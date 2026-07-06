@@ -19,12 +19,9 @@ ml/checkpoints/*
 ml/logs/
 ml/reports/
 
-# Dataset images are large/binary and typically not committed to git —
-# keep the folder structure (.gitkeep files) but ignore actual photos.
-ml/dataset/train/*/*
-ml/dataset/validation/*/*
-ml/dataset/test/*/*
-!ml/dataset/**/.gitkeep
+# Dataset images: committed directly to git for now (MVP scale). If the
+# dataset grows past ~1-2 GB, switch to Git LFS instead of removing this
+# comment and re-ignoring the folder.
 
 # --- OS / editor ---
 .DS_Store
