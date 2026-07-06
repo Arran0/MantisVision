@@ -118,6 +118,15 @@ re-label anything, or to commit images to git at all):
 python scripts/kaggle_sync.py download --dataset <your-kaggle-username>/mantis-vision-kappaphycus-health
 ```
 
+**Training in Google Colab instead of a local machine?** Use
+[`docs/colab/MantisVision_Training.ipynb`](./colab/MantisVision_Training.ipynb)
+— open it at colab.research.google.com (File → Upload notebook, or open
+directly from GitHub), set the runtime to GPU, and run the cells top to
+bottom. It clones this repo, installs dependencies, pulls the dataset from
+Kaggle, trains, evaluates, and lets you download the resulting checkpoint
+before the Colab session ends (Colab runtimes are ephemeral — nothing
+persists after you disconnect unless you download it).
+
 ### 2.3 Validate the dataset
 
 ```bash
