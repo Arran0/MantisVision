@@ -59,28 +59,73 @@ pip install -r requirements.txt
 Read [`docs/DATASET_LABELING_GUIDE.md`](./DATASET_LABELING_GUIDE.md) before
 labeling anything. Consistent labels matter more than volume.
 
-### 2.2 Get photos into the dataset folders
+### 2.2 The dataset lives on Kaggle, not in git
 
-Two paths:
+Photo datasets grow large fast and don't belong in git history. Instead, the
+labeled dataset is a **Kaggle Dataset**, synced with
+`ml/scripts/kaggle_sync.py`. `.gitignore` already excludes the actual image
+files under `ml/dataset/{train,validation,test}/<Class>/` — only the folder
+structure (`.gitkeep`) is committed.
 
-**A. You already have a flat folder of labeled photos** (`raw/Healthy/*.jpg`,
-`raw/Dead/*.jpg`, etc.):
+**One-time setup:**
 
-```bash
-cd ml
-python scripts/split_dataset.py --source /path/to/raw
-```
+1. Create a Kaggle account, then go to kaggle.com/settings → API → "Create
+   New Token". This downloads `kaggle.json`.
+2. Place it at `~/.kaggle/kaggle.json` (`chmod 600`), or set the
+   `KAGGLE_USERNAME` / `KAGGLE_KEY` environment variables instead (simpler on
+   a fresh cloud/CI box where writing dotfiles is awkward).
+3. `pip install -r requirements.txt` (already includes the `kaggle` package).
 
-This copies files into `dataset/{train,validation,test}/<Class>/` using a
-fixed-seed 70/15/15 split (reproducible — re-running with the same seed
-gives the same split).
+**Label photos locally, then get them into `ml/dataset/`:**
 
-**B. You're adding photos incrementally.** Drop them directly into
-`ml/dataset/train/<ClassName>/`, `validation/<ClassName>/`, and
-`test/<ClassName>/` yourself, keeping roughly a 70/15/15 ratio per class.
+- **You have a flat folder of labeled photos** (`raw/Healthy/*.jpg`,
+  `raw/Dead/*.jpg`, etc.):
+
+  ```bash
+  cd ml
+  python scripts/split_dataset.py --source /path/to/raw
+  ```
+
+  Copies files into `dataset/{train,validation,test}/<Class>/` using a
+  fixed-seed 70/15/15 split (reproducible — re-running with the same source
+  files and seed gives the same split every time).
+
+- **You're adding photos incrementally.** Drop them directly into
+  `ml/dataset/train/<ClassName>/`, `validation/<ClassName>/`, and
+  `test/<ClassName>/` yourself, keeping roughly a 70/15/15 ratio per class.
 
 Class folder names (must match exactly): `Healthy`, `Moderate`, `Low`,
 `Decay`, `Dead`, `Predator`, `Disease`.
+
+**Push the dataset to Kaggle** (first time creates it, every time after that
+pushes a new version — Kaggle keeps the version history for you):
+
+```bash
+# first time only
+cp ml/dataset/dataset-metadata.json.example ml/dataset/dataset-metadata.json
+# edit "id" in that file to <your-kaggle-username>/mantis-vision-kappaphycus-health
+git add ml/dataset/dataset-metadata.json && git commit -m "Add Kaggle dataset id"
+python scripts/kaggle_sync.py init
+
+# every time after adding more labeled photos
+python scripts/kaggle_sync.py push -m "Add 50 more Disease examples"
+```
+
+**Pull the dataset onto a fresh machine / training environment** (no need to
+re-label anything, or to commit images to git at all):
+
+```bash
+python scripts/kaggle_sync.py download --dataset <your-kaggle-username>/mantis-vision-kappaphycus-health
+```
+
+**Training in Google Colab instead of a local machine?** Use
+[`docs/colab/MantisVision_Training.ipynb`](./colab/MantisVision_Training.ipynb)
+— open it at colab.research.google.com (File → Upload notebook, or open
+directly from GitHub), set the runtime to GPU, and run the cells top to
+bottom. It clones this repo, installs dependencies, pulls the dataset from
+Kaggle, trains, evaluates, and lets you download the resulting checkpoint
+before the Colab session ends (Colab runtimes are ephemeral — nothing
+persists after you disconnect unless you download it).
 
 ### 2.3 Validate the dataset
 
@@ -306,7 +351,9 @@ TensorFlow Lite or CoreML for native mobile builds later.
 ## End-to-end local checklist
 
 - [ ] `ml`: venv created, `pip install -r requirements.txt` succeeds
-- [ ] Dataset populated, `python -m src.data.validate_dataset` reports no missing/corrupt files
+- [ ] Kaggle credentials configured (`~/.kaggle/kaggle.json` or `KAGGLE_USERNAME`/`KAGGLE_KEY`)
+- [ ] Dataset pushed to Kaggle (`kaggle_sync.py init`/`push`) and/or pulled down (`kaggle_sync.py download`)
+- [ ] `python -m src.data.validate_dataset` reports no missing/corrupt files
 - [ ] `python -m src.train` completes, `ml/checkpoints/best_model.pt` exists
 - [ ] `python -m src.evaluate` produces `ml/reports/evaluation_results.json` and a confusion matrix
 - [ ] `uvicorn src.api.main:app --port 8000` serves `/health` and `/predict`

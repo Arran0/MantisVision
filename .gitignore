@@ -19,12 +19,19 @@ ml/checkpoints/*
 ml/logs/
 ml/reports/
 
-# Dataset images are large/binary and typically not committed to git —
+# Dataset images live on Kaggle (see ml/scripts/kaggle_sync.py), not git —
 # keep the folder structure (.gitkeep files) but ignore actual photos.
 ml/dataset/train/*/*
 ml/dataset/validation/*/*
 ml/dataset/test/*/*
 !ml/dataset/**/.gitkeep
+# dataset-metadata.json itself (not the .example) is intentionally NOT
+# ignored — it's just the Kaggle dataset id/title, not a secret, and every
+# contributor needs the same one to push to the same Kaggle dataset.
+
+# Kaggle API credentials must never be committed
+kaggle.json
+.kaggle/
 
 # --- OS / editor ---
 .DS_Store
