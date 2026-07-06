@@ -9,7 +9,7 @@ this file is the quick reference once you already know the pipeline.
 ```
 ml/
   config.py              # single source of truth: paths, hyperparams, class list
-  dataset/                # train/validation/test/<Class>/ images (gitignored, empty scaffold checked in)
+  dataset/                # train/validation/test/<Class>/ images — lives on Kaggle, gitignored here
   checkpoints/             # saved model weights (gitignored)
   reports/                 # evaluation outputs: confusion matrix, metrics json (gitignored)
   logs/                    # run logs (gitignored)
@@ -24,6 +24,7 @@ ml/
     api/main.py             # FastAPI inference service
   scripts/
     split_dataset.py        # flat labeled folder -> 70/15/15 train/val/test split
+    kaggle_sync.py           # push/pull the labeled dataset to/from a Kaggle Dataset
     export_model.py         # checkpoint -> ONNX for web/mobile deployment
 ```
 
@@ -34,7 +35,8 @@ cd ml
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 1. put labeled photos under dataset/train|validation|test/<ClassName>/
+# 1. get labeled photos into dataset/train|validation|test/<ClassName>/
+python scripts/kaggle_sync.py download --dataset <username>/mantis-vision-kappaphycus-health
 python -m src.data.validate_dataset      # sanity check before training
 
 # 2. train

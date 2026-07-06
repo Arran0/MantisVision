@@ -60,7 +60,9 @@ def main() -> None:
             print(f"Skipping unrecognized class folder: {class_name}")
             continue
 
-        files = [p for p in class_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS]
+        # Sorted so the seeded shuffle below is reproducible across machines —
+        # Path.iterdir() order is filesystem-dependent, not stable.
+        files = sorted(p for p in class_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS)
         if not files:
             print(f"No images found for {class_name}, skipping.")
             continue
