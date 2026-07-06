@@ -1,0 +1,58 @@
+# Mantis Vision — ML Pipeline
+
+Health classifier for *Kappaphycus alvarezii* (Phase 1 / MVP). See
+[`../docs/STEP_BY_STEP.md`](../docs/STEP_BY_STEP.md) for the full walkthrough;
+this file is the quick reference once you already know the pipeline.
+
+## Layout
+
+```
+ml/
+  config.py              # single source of truth: paths, hyperparams, class list
+  dataset/                # train/validation/test/<Class>/ images (gitignored, empty scaffold checked in)
+  checkpoints/             # saved model weights (gitignored)
+  reports/                 # evaluation outputs: confusion matrix, metrics json (gitignored)
+  logs/                    # run logs (gitignored)
+  metadata/labels_template.csv
+  src/
+    data/                  # transforms, ImageFolder dataloaders, dataset validation CLI
+    models/efficientnet.py # transfer-learning model + checkpoint save/load
+    train.py               # two-phase training (frozen head -> fine-tune) with early stopping
+    evaluate.py            # accuracy/precision/recall/F1/confusion matrix/ROC AUC on the test split
+    gradcam.py             # Grad-CAM explainability
+    inference/             # predictor.py (full MVP output) + explanations.py (text templates)
+    api/main.py             # FastAPI inference service
+  scripts/
+    split_dataset.py        # flat labeled folder -> 70/15/15 train/val/test split
+    export_model.py         # checkpoint -> ONNX for web/mobile deployment
+```
+
+## Quick commands
+
+```bash
+cd ml
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 1. put labeled photos under dataset/train|validation|test/<ClassName>/
+python -m src.data.validate_dataset      # sanity check before training
+
+# 2. train
+python -m src.train
+
+# 3. evaluate on the held-out test split
+python -m src.evaluate
+
+# 4. explain a single prediction
+python -m src.gradcam path/to/photo.jpg
+
+# 5. serve predictions
+uvicorn src.api.main:app --reload --port 8000
+
+# 6. export for web/mobile
+python scripts/export_model.py
+```
+
+Class labels (folder names must match exactly): `Healthy`, `Moderate`, `Low`,
+`Decay`, `Dead`, `Predator`, `Disease`. Labeling standards are in
+[`../docs/DATASET_LABELING_GUIDE.md`](../docs/DATASET_LABELING_GUIDE.md).

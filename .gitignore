@@ -1,0 +1,32 @@
+# --- Node / Next.js (apps/web) ---
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+.vercel
+*.tsbuildinfo
+
+# --- Python / ML (ml) ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+ml/checkpoints/*
+!ml/checkpoints/.gitkeep
+ml/logs/
+ml/reports/
+
+# Dataset images are large/binary and typically not committed to git —
+# keep the folder structure (.gitkeep files) but ignore actual photos.
+ml/dataset/train/*/*
+ml/dataset/validation/*/*
+ml/dataset/test/*/*
+!ml/dataset/**/.gitkeep
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+.idea/
