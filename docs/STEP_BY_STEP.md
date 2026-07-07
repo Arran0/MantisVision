@@ -70,10 +70,14 @@ structure (`.gitkeep`) is committed.
 **One-time setup:**
 
 1. Create a Kaggle account, then go to kaggle.com/settings → API → "Create
-   New Token". This downloads `kaggle.json`.
-2. Place it at `~/.kaggle/kaggle.json` (`chmod 600`), or set the
-   `KAGGLE_USERNAME` / `KAGGLE_KEY` environment variables instead (simpler on
-   a fresh cloud/CI box where writing dotfiles is awkward).
+   New Token" and copy the username/key token shown there.
+2. Set them as environment variables:
+   ```bash
+   export KAGGLE_USERNAME=your_username
+   export KAGGLE_KEY=your_key
+   ```
+   (If your account instead downloads a `kaggle.json` file, place it at
+   `~/.kaggle/kaggle.json` with `chmod 600` — either method works.)
 3. `pip install -r requirements.txt` (already includes the `kaggle` package).
 
 **Label photos locally, then get them into `ml/dataset/`:**
