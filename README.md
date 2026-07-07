@@ -6,8 +6,9 @@ assessment, disease/predator detection, damage estimation, and treatment
 recommendations.
 
 **Phase 1 (current scope):** health classification for one species,
-*Kappaphycus alvarezii*, into 7 classes — `Healthy`, `Moderate`, `Low`,
-`Decay`, `Dead`, `Predator` (grazed), `Disease`.
+*Kappaphycus alvarezii*, into 6 classes — `Healthy`, `Moderate`, `Low`,
+`Decay`, `Dried`, `Disease`. (`Predator` was dropped for now, pending real
+grazing photos — see `docs/DATASET_LABELING_GUIDE.md`.)
 
 The system is built as independent, composable models rather than one large
 model — see [`docs/STEP_BY_STEP.md`](docs/STEP_BY_STEP.md#long-term-roadmap-future-expansion)

@@ -22,8 +22,7 @@ CLASS_NAMES = [
     "Moderate",
     "Low",
     "Decay",
-    "Dead",
-    "Predator",
+    "Dried",
     "Disease",
 ]
 

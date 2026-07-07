@@ -83,7 +83,7 @@ structure (`.gitkeep`) is committed.
 **Label photos locally, then get them into `ml/dataset/`:**
 
 - **You have a flat folder of labeled photos** (`raw/Healthy/*.jpg`,
-  `raw/Dead/*.jpg`, etc.):
+  `raw/Dried/*.jpg`, etc.):
 
   ```bash
   cd ml
@@ -99,7 +99,8 @@ structure (`.gitkeep`) is committed.
   `test/<ClassName>/` yourself, keeping roughly a 70/15/15 ratio per class.
 
 Class folder names (must match exactly): `Healthy`, `Moderate`, `Low`,
-`Decay`, `Dead`, `Predator`, `Disease`.
+`Decay`, `Dried`, `Disease` (6 classes for now — `Predator` was dropped until
+real grazing photos are available; see `docs/DATASET_LABELING_GUIDE.md`).
 
 **Push the dataset to Kaggle** (first time creates it, every time after that
 pushes a new version — Kaggle keeps the version history for you):
@@ -220,7 +221,7 @@ Produces, per the spec's "don't rely only on accuracy" requirement:
 - Full results JSON → `ml/reports/evaluation_results.json`
 
 Use the per-class breakdown to see which classes need more data — e.g. if
-`Disease` sits at 81% while `Dead` is at 99%, that's a signal to collect more
+`Disease` sits at 81% while `Dried` is at 99%, that's a signal to collect more
 `Disease` photos, not to tune hyperparameters further.
 
 ---
