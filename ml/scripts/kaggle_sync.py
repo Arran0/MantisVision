@@ -5,10 +5,12 @@ history) and a shareable URL.
 
 One-time setup:
   1. Create a Kaggle account, then go to kaggle.com/settings -> API ->
-     "Create New Token". This downloads kaggle.json.
-  2. Place it at ~/.kaggle/kaggle.json (chmod 600), OR set the
-     KAGGLE_USERNAME / KAGGLE_KEY environment variables instead (easier in
-     cloud/CI environments where writing dotfiles is awkward).
+     "Create New Token" and copy the username/key token shown there.
+  2. Set them as environment variables:
+       export KAGGLE_USERNAME=your_username
+       export KAGGLE_KEY=your_key
+     (If your account instead downloads a kaggle.json file, place it at
+     ~/.kaggle/kaggle.json with `chmod 600` — either method works.)
   3. pip install -r requirements.txt (includes the `kaggle` package)
 
 First time only (creates the Kaggle dataset from what's currently in
