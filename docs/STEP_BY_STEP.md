@@ -126,10 +126,16 @@ python scripts/kaggle_sync.py download --dataset <your-kaggle-username>/mantis-v
 [`docs/colab/MantisVision_Training.ipynb`](./colab/MantisVision_Training.ipynb)
 — open it at colab.research.google.com (File → Upload notebook, or open
 directly from GitHub), set the runtime to GPU, and run the cells top to
-bottom. It clones this repo, installs dependencies, pulls the dataset from
-Kaggle, trains, evaluates, and lets you download the resulting checkpoint
-before the Colab session ends (Colab runtimes are ephemeral — nothing
-persists after you disconnect unless you download it).
+bottom. It clones this repo, installs dependencies, lets you upload a zip of
+your `train/validation/test` folders directly through a browser file picker
+(no Kaggle account needed), trains, evaluates, and lets you download the
+resulting checkpoint before the Colab session ends (Colab runtimes are
+ephemeral — nothing persists after you disconnect unless you download it,
+which means you'll need to re-upload the dataset zip each new session).
+
+Kaggle (`scripts/kaggle_sync.py`) is still there as an alternative once the
+dataset grows large enough that re-uploading a zip every Colab session gets
+tedious — it's not required for the notebook above.
 
 ### 2.3 Validate the dataset
 
