@@ -355,7 +355,9 @@ TensorFlow Lite or CoreML for native mobile builds later.
 - **ML inference API (`ml`)** → Vercel's Node/edge runtime is not a fit for a
   PyTorch service. Deploy `ml/src/api` as its own service instead — a small
   container on Fly.io/Render/Railway, or a GPU-less CPU box is fine for
-  EfficientNet-B0 at this scale. Point the web app's `ML_API_URL` at it.
+  EfficientNet-B0 at this scale. Point the web app's `ML_API_URL` at it. See
+  [`docs/DEPLOY_ML_API.md`](DEPLOY_ML_API.md) for the exact Render setup
+  (`ml/Dockerfile` is already in the repo).
 
 ---
 
