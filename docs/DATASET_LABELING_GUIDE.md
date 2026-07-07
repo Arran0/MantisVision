@@ -9,10 +9,16 @@ it for a second annotator rather than guessing.
 
 ```
 ml/dataset/
-  train/{Healthy,Moderate,Low,Decay,Dead,Predator,Disease}/
-  validation/{Healthy,Moderate,Low,Decay,Dead,Predator,Disease}/
-  test/{Healthy,Moderate,Low,Decay,Dead,Predator,Disease}/
+  train/{Healthy,Moderate,Low,Decay,Dried,Disease}/
+  validation/{Healthy,Moderate,Low,Decay,Dried,Disease}/
+  test/{Healthy,Moderate,Low,Decay,Dried,Disease}/
 ```
+
+Phase 1 currently trains on 6 classes — `Predator` (grazed) was dropped for
+now since there's no real photo data for it yet. It can be added back later
+as a 7th class the moment labeled examples exist; nothing else in the
+pipeline needs to change to support that (`config.py`'s `CLASS_NAMES` is the
+only place the class list is defined).
 
 Folder names must match exactly (case-sensitive) — they become the model's
 class labels via `torchvision.datasets.ImageFolder`.
@@ -29,7 +35,7 @@ Every image needs at minimum:
 | filename | label |
 |---|---|
 | healthy_001.jpg | Healthy |
-| dead_001.jpg | Dead |
+| dried_001.jpg | Dried |
 
 Use `ml/metadata/labels_template.csv` as the starting spreadsheet. Add these
 columns as they become available — they aren't required for Phase 1 training
@@ -58,15 +64,10 @@ but unlock per-farm/per-region analysis later: `species`, `gps`, `farm`,
 - Brown patches
 - Rot
 
-### Dead
-- Completely white
+### Dried
+- Completely dried out/bleached white
 - Detached from the line/substrate
 - No living tissue anywhere in frame
-
-### Predator (Grazed by Predator)
-- Bite marks
-- Missing branches
-- Irregular, non-biological cuts (as opposed to smooth decay edges)
 
 ### Disease
 - Visible lesions
@@ -74,16 +75,16 @@ but unlock per-farm/per-region analysis later: `species`, `gps`, `farm`,
 
 ## Annotation practices
 
-1. **One class per image.** If a specimen shows both grazing and disease,
-   pick the dominant/most obvious symptom, or better, exclude it from the
-   Phase 1 dataset and flag it for the future multi-label Disease/Predator
-   models.
+1. **One class per image.** If a specimen shows both decay and disease
+   symptoms, pick the dominant/most obvious symptom, or better, exclude it
+   from the Phase 1 dataset and flag it for the future multi-label Disease
+   model.
 2. **Consistent framing.** Fill the frame with the specimen; avoid heavy
    background clutter that could let the model shortcut on non-biological
-   cues (e.g. always photographing "Dead" samples on a particular boat
+   cues (e.g. always photographing "Dried" samples on a particular boat
    deck).
 3. **Two-annotator agreement for ambiguous classes** (Low vs. Moderate,
-   Decay vs. Dead) where possible. Disagreements should be discussed and
+   Decay vs. Dried) where possible. Disagreements should be discussed and
    resolved before the image enters the training set, not silently averaged.
 4. **Do not relabel to fix class imbalance.** If a class is underrepresented,
    collect more images of that class — don't reclassify borderline images

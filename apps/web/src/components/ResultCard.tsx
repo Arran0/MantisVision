@@ -5,8 +5,7 @@ const HEALTH_COLORS: Record<string, string> = {
   Moderate: "bg-yellow-100 text-yellow-800",
   Low: "bg-orange-100 text-orange-800",
   Decay: "bg-amber-100 text-amber-900",
-  Dead: "bg-slate-200 text-slate-800",
-  Predator: "bg-red-100 text-red-800",
+  Dried: "bg-slate-200 text-slate-800",
   Disease: "bg-purple-100 text-purple-800",
 };
 

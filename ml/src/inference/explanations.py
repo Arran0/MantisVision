@@ -12,8 +12,7 @@ EXPLANATIONS: dict[str, str] = {
     "Moderate": "Minor bleaching on branches and early tissue degradation observed.",
     "Low": "Significant discoloration and reduced branching compared to healthy tissue.",
     "Decay": "Signs of tissue melting, brown patches, and rot are visible.",
-    "Dead": "Tissue is completely white/detached with no living tissue remaining.",
-    "Predator": "Bite marks and irregular cuts consistent with predator grazing.",
+    "Dried": "Tissue is completely dried out/detached with no living tissue remaining.",
     "Disease": "Lesions and infection symptoms consistent with a disease outbreak.",
 }
 
@@ -22,8 +21,7 @@ RECOMMENDATIONS: dict[str, str] = {
     "Moderate": "Increase water movement. Inspect for grazers and early disease signs.",
     "Low": "Relocate to better water flow if possible. Increase inspection frequency.",
     "Decay": "Remove affected fragments to prevent spread. Check water quality (temperature, salinity).",
-    "Dead": "Remove and dispose of dead material. Inspect surrounding line for early-stage damage.",
-    "Predator": "Inspect for and remove predators (e.g. sea urchins, rabbitfish). Consider protective netting.",
+    "Dried": "Remove and dispose of dried-out material. Inspect surrounding line for early-stage damage.",
     "Disease": "Isolate affected line segments. Consult a specialist to confirm the pathogen (see Disease Model, future work).",
 }
 

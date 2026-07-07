@@ -56,5 +56,5 @@ python scripts/export_model.py
 ```
 
 Class labels (folder names must match exactly): `Healthy`, `Moderate`, `Low`,
-`Decay`, `Dead`, `Predator`, `Disease`. Labeling standards are in
+`Decay`, `Dried`, `Disease`. Labeling standards are in
 [`../docs/DATASET_LABELING_GUIDE.md`](../docs/DATASET_LABELING_GUIDE.md).
