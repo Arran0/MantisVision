@@ -79,6 +79,12 @@ def push(message: str) -> None:
 
 
 def download(dataset: str) -> None:
+    if not dataset or "/" not in dataset or dataset.upper().startswith("YOUR_"):
+        raise SystemExit(
+            f'"{dataset}" doesn\'t look like a real dataset id.\n'
+            "Set --dataset to <your-kaggle-username>/<dataset-slug>, copied from your "
+            "dataset's actual URL on kaggle.com/datasets/... — not the placeholder text."
+        )
     api = _get_api()
     config.dataset_dir.mkdir(parents=True, exist_ok=True)
     api.dataset_download_files(dataset, path=str(config.dataset_dir), unzip=True, quiet=False)
