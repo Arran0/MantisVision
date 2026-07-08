@@ -1,7 +1,7 @@
 ---
 title: Mantis Vision Inference API
 emoji: 👁️
-colorFrom: orange
+colorFrom: yellow
 colorTo: green
 sdk: docker
 app_port: 8000
