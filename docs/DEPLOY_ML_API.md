@@ -4,6 +4,11 @@
 container host. These are the steps for Render, which is free-tier friendly
 and builds straight from the `ml/Dockerfile` already in this repo.
 
+> Render's free tier caps out at 512 MB RAM, which is tight for a PyTorch
+> service. If you're hitting out-of-memory crashes, see
+> [`DEPLOY_HUGGINGFACE.md`](DEPLOY_HUGGINGFACE.md) instead — same Dockerfile,
+> free tier gives 16 GB RAM.
+
 ## 1. Host the checkpoint somewhere downloadable
 
 `ml/checkpoints/best_model.pt` is gitignored (binary model weights don't

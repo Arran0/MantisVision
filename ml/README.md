@@ -1,8 +1,24 @@
+---
+title: Mantis Vision Inference API
+emoji: 👁️
+colorFrom: orange
+colorTo: green
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # Mantis Vision — ML Pipeline
 
 Health classifier for *Kappaphycus alvarezii* (Phase 1 / MVP). See
 [`../docs/STEP_BY_STEP.md`](../docs/STEP_BY_STEP.md) for the full walkthrough;
 this file is the quick reference once you already know the pipeline.
+
+The YAML block above is Hugging Face Spaces' config header — when this
+folder is deployed as a Space (see
+[`../docs/DEPLOY_HUGGINGFACE.md`](../docs/DEPLOY_HUGGINGFACE.md)), it tells
+the platform to build `Dockerfile` and route traffic to port 8000. It's
+inert everywhere else (GitHub just renders it as a normal README).
 
 ## Layout
 
