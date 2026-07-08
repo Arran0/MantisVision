@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ML_API_URL } from "@/lib/config";
 
+// A free-tier inference host (e.g. Render) can cold-start for ~50s after
+// idling. Allow the function to run long enough to wait one out instead of
+// being killed at the platform's 10s default. 60s is the Vercel Hobby ceiling.
+export const maxDuration = 60;
+
 // Abort the upstream call rather than letting a stuck inference service hold
-// the request open until the platform kills the function.
-const UPSTREAM_TIMEOUT_MS = 25_000;
+// the request open until the platform kills the function. Kept just under
+// maxDuration so we still return a clean JSON error on a genuine hang.
+const UPSTREAM_TIMEOUT_MS = 55_000;
 
 // Thin proxy to the Python inference service so the browser never needs to
 // know the ML service's address (and so CORS/auth can be layered on here
