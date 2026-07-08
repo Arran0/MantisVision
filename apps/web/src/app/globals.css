@@ -11,27 +11,57 @@ html {
 }
 
 body {
-  /* Soft, Apple-style backdrop tinted with the mantis palette. */
-  background-color: #f5f6f8;
-  background-image:
-    radial-gradient(60rem 40rem at 8% -10%, rgba(255, 122, 26, 0.10), transparent 60%),
-    radial-gradient(55rem 40rem at 100% 0%, rgba(26, 122, 224, 0.12), transparent 55%),
-    radial-gradient(60rem 45rem at 50% 120%, rgba(22, 163, 74, 0.10), transparent 60%);
-  background-attachment: fixed;
+  background-color: #f4f6fa;
 }
 
 @layer components {
+  /* Drifting mantis-shrimp gradient blobs used by <Background />. */
+  .mv-blob {
+    @apply absolute rounded-full blur-3xl;
+    opacity: 0.55;
+    will-change: transform;
+  }
+  .mv-blob-coral {
+    @apply h-[34rem] w-[34rem] bg-coral-500;
+    top: -12rem;
+    left: -10rem;
+    animation: mv-drift-a 26s ease-in-out infinite;
+  }
+  .mv-blob-ocean {
+    @apply h-[38rem] w-[38rem] bg-ocean-500;
+    top: -6rem;
+    right: -14rem;
+    animation: mv-drift-b 32s ease-in-out infinite;
+  }
+  .mv-blob-seaweed {
+    @apply h-[36rem] w-[36rem] bg-seaweed-500;
+    bottom: -16rem;
+    left: 20%;
+    animation: mv-drift-c 29s ease-in-out infinite;
+  }
+  .mv-vignette {
+    background: radial-gradient(120% 90% at 50% 0%, transparent 40%, rgba(15, 23, 42, 0.06) 100%);
+  }
+
   .mv-card {
-    @apply rounded-3xl border border-black/5 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur-xl;
+    @apply rounded-3xl border border-white/60 bg-white/75 shadow-xl shadow-slate-900/5 backdrop-blur-2xl;
   }
 
   .mv-btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-ocean-500/25 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-ocean-500/25 transition duration-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60;
     background-image: linear-gradient(120deg, #ff7a1a 0%, #1a7ae0 55%, #16a34a 100%);
+  }
+  .mv-btn-primary:hover {
+    filter: brightness(1.06);
+    box-shadow: 0 12px 28px -8px rgba(26, 122, 224, 0.45);
   }
 
   .mv-btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-full border border-black/10 bg-white/70 px-6 py-3.5 text-base font-semibold text-slate-700 backdrop-blur transition hover:bg-white active:scale-[0.98];
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-black/10 bg-white/70 px-6 py-3.5 text-base font-semibold text-slate-700 backdrop-blur transition duration-200 hover:bg-white active:scale-[0.97];
+  }
+
+  .mv-icon-btn {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/45 text-white backdrop-blur-md transition duration-200 hover:bg-slate-900/60 active:scale-90;
   }
 
   .mv-text-gradient {
@@ -39,5 +69,42 @@ body {
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+  }
+
+  .mv-fade-in {
+    animation: mv-fade-in 0.45s ease both;
+  }
+}
+
+@keyframes mv-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mv-drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(4rem, 3rem) scale(1.08); }
+}
+@keyframes mv-drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-3rem, 4rem) scale(1.06); }
+}
+@keyframes mv-drift-c {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(3rem, -3rem) scale(1.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-blob {
+    animation: none !important;
+  }
+  .mv-fade-in {
+    animation: none !important;
   }
 }
