@@ -17,7 +17,8 @@ ENV PORT=8000
 ENV OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \
-    ENABLE_GRADCAM=false
+    ENABLE_GRADCAM=false \
+    PYTHONUNBUFFERED=1
 EXPOSE 8000
 
 CMD ["sh", "-c", "uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT} --workers 1"]
