@@ -1,4 +1,4 @@
-"""Inference API for the Kappaphycus alvarezii health classifier (Milestone 6).
+"""Inference API for the seaweed health classifier (Milestone 6).
 
 Designed for future expansion: the response shape already carries `species`
 so that adding real species identification later is additive, not breaking.
@@ -32,7 +32,7 @@ logging.basicConfig(level=logging.INFO)
 # urlretrieve() with no timeout does).
 CHECKPOINT_DOWNLOAD_TIMEOUT_S = 60
 
-app = FastAPI(title="Mantis Vision Inference API", version="0.1.0")
+app = FastAPI(title="Mantis Vision Inference API", version="0.2.0")
 
 # In production, set WEB_APP_ORIGIN to the deployed PWA's origin (e.g. your
 # Vercel URL) to stop other sites from calling this API from a browser.
@@ -59,6 +59,18 @@ def _download_checkpoint(path: Path, url: str) -> None:
     logger.info("Checkpoint downloaded to %s (%d bytes).", path, path.stat().st_size)
 
 
+def _maybe_download_calibration(url: str | None) -> None:
+    if not url:
+        return
+    calibration_path = config.checkpoints_dir / "calibration.json"
+    if calibration_path.exists():
+        return
+    try:
+        _download_checkpoint(calibration_path, url)
+    except Exception:
+        logger.exception("Failed to download calibration.json; confidence_calibrated will stay null.")
+
+
 def get_predictor() -> Predictor:
     global _predictor
     if _predictor is None:
@@ -80,7 +92,9 @@ def _load_model_on_startup() -> None:
     # ml/checkpoints/ is gitignored, so a fresh deploy (e.g. on Render or a
     # Hugging Face Space) won't have best_model.pt unless we fetch it. Set
     # MODEL_URL to a direct-download link (e.g. a GitHub Release asset) to
-    # have it pulled down once at boot.
+    # have it pulled down once at boot. CALIBRATION_URL is the same idea for
+    # calibration.json (optional — without it, confidence_calibrated stays
+    # null, an honest signal rather than a silent failure).
     #
     # Failures here are caught rather than left to crash the process: a bad
     # MODEL_URL should leave the API up and reporting model_loaded: false
@@ -92,6 +106,7 @@ def _load_model_on_startup() -> None:
             _download_checkpoint(checkpoint_path, model_url)
         elif not checkpoint_path.exists():
             logger.warning("MODEL_URL is not set and no checkpoint is present at %s.", checkpoint_path)
+        _maybe_download_calibration(os.environ.get("CALIBRATION_URL"))
         if checkpoint_path.exists():
             get_predictor()
             logger.info("Model loaded successfully.")
@@ -103,8 +118,14 @@ def _load_model_on_startup() -> None:
 def health() -> HealthCheckResponse:
     checkpoint_path = config.checkpoints_dir / "best_model.pt"
     model_loaded = checkpoint_path.exists()
-    classes = config.class_names if not model_loaded else get_predictor().class_names
-    return HealthCheckResponse(status="ok", model_loaded=model_loaded, classes=classes)
+    if model_loaded:
+        predictor = get_predictor()
+        category_names, condition_names = predictor.category_names, predictor.condition_names
+    else:
+        category_names, condition_names = config.category_names, config.condition_names
+    return HealthCheckResponse(
+        status="ok", model_loaded=model_loaded, category_names=category_names, condition_names=condition_names
+    )
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -118,9 +139,12 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
 
     return PredictionResponse(
         species=result.species,
-        health=result.health,
+        category=result.category,
+        condition=result.condition,
+        health_score=result.health_score,
         confidence=result.confidence,
-        explanation=result.explanation,
+        confidence_calibrated=result.confidence_calibrated,
+        explanation_bullets=result.explanation_bullets,
         recommendation=result.recommendation,
         gradcam_png_base64=result.gradcam_base64_png,
     )

@@ -1,12 +1,14 @@
 """Single entrypoint for turning an uploaded image into the full MVP output:
-species, health, confidence, explanation, recommendation, and a Grad-CAM
-heatmap. Used by the FastAPI inference service (src/api/main.py).
+species, category, condition, health score, confidence, explanation bullets,
+recommendation, and a Grad-CAM heatmap. Used by the FastAPI inference service
+(src/api/main.py).
 """
 from __future__ import annotations
 
 import base64
 import gc
 import io
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,15 +17,11 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-from config import config
+from config import SPECIES_DISPLAY_NAME, config
 from src.data.transforms import build_transforms
-from src.inference.explanations import explanation_for, recommendation_for
+from src.inference.explanations import explanation_bullets_for, recommendation_for
 from src.models.efficientnet import load_checkpoint
 from src.utils.seed import get_device
-
-# Phase 1 supports exactly one species; species identification becomes its
-# own model in a later milestone (see docs/STEP_BY_STEP.md).
-SPECIES_NAME = "Kappaphycus alvarezii"
 
 # The Grad-CAM backward pass roughly doubles peak memory and drags in OpenCV,
 # which pushes a 512 MB free-tier host over its limit. It's therefore opt-in:
@@ -35,9 +33,12 @@ ENABLE_GRADCAM = os.environ.get("ENABLE_GRADCAM", "false").lower() in ("1", "tru
 @dataclass
 class PredictionResult:
     species: str
-    health: str
+    category: str
+    condition: str | None
+    health_score: float
     confidence: float
-    explanation: str
+    confidence_calibrated: float | None
+    explanation_bullets: list[str]
     recommendation: str
     gradcam_base64_png: str
 
@@ -49,8 +50,18 @@ class Predictor:
         torch.set_num_threads(1)
         self.device = get_device(config.device)
         checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
-        self.model, self.class_names = load_checkpoint(checkpoint_path, self.device)
+        self.model, self.category_names, self.condition_names = load_checkpoint(checkpoint_path, self.device)
+        self.healthy_idx = self.category_names.index("Healthy")
         self.transform = build_transforms(config, train=False)
+
+        # Calibration is optional: predictions work fine without it, just with
+        # confidence_calibrated left as None (an honest signal that no
+        # calibration check has been run yet — see src/calibrate.py).
+        self.temperature: float | None = None
+        calibration_path = checkpoint_path.parent / "calibration.json"
+        if calibration_path.exists():
+            self.temperature = json.loads(calibration_path.read_text()).get("temperature")
+
         gc.collect()
 
     def predict(self, image_bytes: bytes) -> PredictionResult:
@@ -58,12 +69,28 @@ class Predictor:
         input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
         with torch.inference_mode():
-            logits = self.model(input_tensor)
-            probs = F.softmax(logits, dim=1).squeeze(0)
-            class_index = int(probs.argmax().item())
-            confidence = float(probs[class_index].item())
+            category_logits, condition_logits, score = self.model(input_tensor)
+            category_probs = F.softmax(category_logits, dim=1).squeeze(0)
+            category_idx = int(category_probs.argmax().item())
+            confidence = float(category_probs[category_idx].item())
 
-        label = self.class_names[class_index]
+            confidence_calibrated = None
+            if self.temperature:
+                calibrated_probs = F.softmax(category_logits / self.temperature, dim=1).squeeze(0)
+                confidence_calibrated = float(calibrated_probs[category_idx].item())
+
+            category = self.category_names[category_idx]
+
+            # The condition head is never trained on Healthy samples (masked
+            # loss, see src/train.py), so its output there is undefined —
+            # force it to None rather than trust an unsupervised guess.
+            condition = None
+            if category != self.category_names[self.healthy_idx]:
+                condition_idx = int(F.softmax(condition_logits, dim=1).squeeze(0).argmax().item())
+                condition_name = self.condition_names[condition_idx]
+                condition = condition_name if condition_name != "None" else None
+
+            health_score = float(score.squeeze(0).item())
 
         gradcam_b64 = ""
         if ENABLE_GRADCAM:
@@ -71,17 +98,20 @@ class Predictor:
             # loaded (and only costs memory) when explicitly enabled.
             from src.gradcam import generate_gradcam
 
-            overlay = generate_gradcam(self.model, image, class_index, self.device)
+            overlay = generate_gradcam(self.model, image, category_idx, self.device)
             buffer = io.BytesIO()
             Image.fromarray(overlay).save(buffer, format="PNG")
             gradcam_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         del input_tensor
         return PredictionResult(
-            species=SPECIES_NAME,
-            health=label,
+            species=SPECIES_DISPLAY_NAME,
+            category=category,
+            condition=condition,
+            health_score=health_score,
             confidence=confidence,
-            explanation=explanation_for(label),
-            recommendation=recommendation_for(label),
+            confidence_calibrated=confidence_calibrated,
+            explanation_bullets=explanation_bullets_for(category, condition),
+            recommendation=recommendation_for(category, condition),
             gradcam_base64_png=gradcam_b64,
         )

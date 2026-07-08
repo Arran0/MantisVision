@@ -1,8 +1,21 @@
 """Evaluate the best checkpoint on the held-out test split.
 
-Produces accuracy, precision, recall, F1 (macro + per-class), a confusion
-matrix image, and one-vs-rest ROC AUC per class. Per spec: never judge the
-model on accuracy alone.
+Reports metrics per head, per spec: never judge the model on accuracy alone.
+  - category: accuracy/precision/recall/F1 (macro + per-class), confusion
+    matrix, one-vs-rest ROC AUC — same shape as the old single-head report,
+    just 3-way instead of 6-way.
+  - condition: same metrics, computed only on test samples whose category is
+    not Healthy (the condition head is never trained on Healthy samples —
+    see src/train.py — so including them would trivially inflate accuracy
+    with an "always None" shortcut).
+  - score: MAE/RMSE/R^2 against the heuristic anchor targets, plus a
+    scatter plot and a per-raw-class strip plot. IMPORTANT CAVEAT: these
+    numbers measure agreement with config.CLASS_TARGET_MAP's anchor values,
+    NOT real biological ground truth — no expert-scored 0-10 dataset exists
+    yet (see config.py's anchor justification comments).
+  - calibration: raw (uncalibrated) ECE is always reported. If
+    `checkpoints/calibration.json` exists (produced by `python -m
+    src.calibrate`), the calibrated ECE is reported alongside it.
 
 Usage:
     python -m src.evaluate
@@ -21,80 +34,37 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay,
     classification_report,
     confusion_matrix,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
     roc_auc_score,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import config  # noqa: E402
-from src.data.dataset import get_dataloaders  # noqa: E402
+from config import CLASS_TARGET_MAP, config  # noqa: E402
+from src.calibration import compute_ece  # noqa: E402
+from src.data.dataset import get_multihead_dataloaders  # noqa: E402
 from src.models.efficientnet import load_checkpoint  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 from src.utils.seed import get_device, set_seed  # noqa: E402
 
 
-def evaluate(checkpoint_path: Path | None = None) -> dict:
-    set_seed(config.seed)
-    device = get_device(config.device)
-    logger = get_logger("evaluate", config.logs_dir)
-
-    checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
-    model, class_names = load_checkpoint(checkpoint_path, device)
-    logger.info("Loaded checkpoint %s (classes=%s)", checkpoint_path, class_names)
-
-    data = get_dataloaders(config)
-    assert data.class_names == class_names, "Checkpoint class order does not match dataset."
-
-    all_labels, all_preds, all_probs = [], [], []
-    with torch.no_grad():
-        for images, labels in data.test:
-            images = images.to(device)
-            outputs = model(images)
-            probs = F.softmax(outputs, dim=1).cpu().numpy()
-            preds = probs.argmax(axis=1)
-
-            all_labels.extend(labels.numpy().tolist())
-            all_preds.extend(preds.tolist())
-            all_probs.extend(probs.tolist())
-
-    all_labels_arr = np.array(all_labels)
-    all_preds_arr = np.array(all_preds)
-    all_probs_arr = np.array(all_probs)
-
-    report = classification_report(
-        all_labels_arr, all_preds_arr, target_names=class_names, output_dict=True, zero_division=0
-    )
-    logger.info(
-        "\n%s",
-        classification_report(all_labels_arr, all_preds_arr, target_names=class_names, zero_division=0),
-    )
-
+def _head_report(labels: np.ndarray, preds: np.ndarray, probs: np.ndarray, names: list[str]) -> dict:
+    report = classification_report(labels, preds, target_names=names, output_dict=True, zero_division=0, labels=list(range(len(names))))
+    cm = confusion_matrix(labels, preds, labels=list(range(len(names))))
     per_class_accuracy = {}
-    cm = confusion_matrix(all_labels_arr, all_preds_arr)
-    for i, class_name in enumerate(class_names):
+    for i, name in enumerate(names):
         support = cm[i].sum()
-        per_class_accuracy[class_name] = float(cm[i, i] / support) if support else 0.0
+        per_class_accuracy[name] = float(cm[i, i] / support) if support else 0.0
 
     roc_auc = {}
     try:
-        auc_scores = roc_auc_score(
-            all_labels_arr, all_probs_arr, multi_class="ovr", average=None, labels=list(range(len(class_names)))
-        )
-        roc_auc = {class_names[i]: float(score) for i, score in enumerate(auc_scores)}
+        auc_scores = roc_auc_score(labels, probs, multi_class="ovr", average=None, labels=list(range(len(names))))
+        roc_auc = {names[i]: float(score) for i, score in enumerate(auc_scores)}
     except ValueError as e:
-        logger.warning("Could not compute ROC AUC (likely a class missing from the test split): %s", e)
+        roc_auc = {"error": str(e)}
 
-    config.reports_dir.mkdir(parents=True, exist_ok=True)
-
-    fig, ax = plt.subplots(figsize=(8, 7))
-    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names).plot(
-        ax=ax, cmap="Blues", xticks_rotation=45
-    )
-    plt.tight_layout()
-    cm_path = config.reports_dir / "confusion_matrix.png"
-    fig.savefig(cm_path, dpi=150)
-    plt.close(fig)
-
-    results = {
+    return {
         "accuracy": report["accuracy"],
         "macro_avg": report["macro avg"],
         "weighted_avg": report["weighted avg"],
@@ -107,15 +77,150 @@ def evaluate(checkpoint_path: Path | None = None) -> dict:
                 "accuracy": per_class_accuracy[name],
                 "roc_auc": roc_auc.get(name),
             }
-            for name in class_names
+            for name in names
         },
-        "confusion_matrix_path": str(cm_path),
+        "confusion_matrix": cm.tolist(),
+    }
+
+
+def _save_confusion_matrix(cm: list, names: list[str], path: Path, title: str) -> None:
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ConfusionMatrixDisplay(confusion_matrix=np.array(cm), display_labels=names).plot(ax=ax, cmap="Blues", xticks_rotation=45)
+    ax.set_title(title)
+    plt.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def evaluate(checkpoint_path: Path | None = None) -> dict:
+    set_seed(config.seed)
+    device = get_device(config.device)
+    logger = get_logger("evaluate", config.logs_dir)
+
+    checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
+    model, category_names, condition_names = load_checkpoint(checkpoint_path, device)
+    logger.info("Loaded checkpoint %s (categories=%s, conditions=%s)", checkpoint_path, category_names, condition_names)
+
+    data = get_multihead_dataloaders(config, CLASS_TARGET_MAP)
+    assert data.category_names == category_names, "Checkpoint category order does not match dataset."
+    assert data.condition_names == condition_names, "Checkpoint condition order does not match dataset."
+    healthy_idx = category_names.index("Healthy")
+
+    cat_labels, cat_preds, cat_probs = [], [], []
+    cond_labels, cond_preds, cond_probs = [], [], []
+    score_targets_all, score_preds_all, raw_class_all = [], [], []
+
+    # raw_class per sample is recovered from the underlying ImageFolder so the
+    # score scatter/strip plots can be grouped by the original 6 folders.
+    raw_classes = data.test.dataset.image_folder.classes
+
+    with torch.no_grad():
+        idx = 0
+        for images, category_batch, condition_batch, score_batch in data.test:
+            images = images.to(device)
+            category_logits, condition_logits, score_pred = model(images)
+            cat_p = F.softmax(category_logits, dim=1).cpu().numpy()
+            cond_p = F.softmax(condition_logits, dim=1).cpu().numpy()
+
+            cat_labels.extend(category_batch.numpy().tolist())
+            cat_preds.extend(cat_p.argmax(axis=1).tolist())
+            cat_probs.extend(cat_p.tolist())
+
+            mask = (category_batch != healthy_idx).numpy()
+            if mask.any():
+                cond_labels.extend(condition_batch.numpy()[mask].tolist())
+                cond_preds.extend(cond_p.argmax(axis=1)[mask].tolist())
+                cond_probs.extend(cond_p[mask].tolist())
+
+            score_targets_all.extend(score_batch.numpy().tolist())
+            score_preds_all.extend(score_pred.cpu().numpy().tolist())
+            batch_size = images.size(0)
+            raw_class_all.extend(
+                raw_classes[data.test.dataset.image_folder.samples[i][1]] for i in range(idx, idx + batch_size)
+            )
+            idx += batch_size
+
+    category_result = _head_report(np.array(cat_labels), np.array(cat_preds), np.array(cat_probs), category_names)
+    condition_result = (
+        _head_report(np.array(cond_labels), np.array(cond_preds), np.array(cond_probs), condition_names)
+        if cond_labels
+        else {"note": "No non-Healthy samples in test split."}
+    )
+
+    score_targets_arr = np.array(score_targets_all)
+    score_preds_arr = np.array(score_preds_all)
+    score_result = {
+        "mae": float(mean_absolute_error(score_targets_arr, score_preds_arr)),
+        "rmse": float(mean_squared_error(score_targets_arr, score_preds_arr) ** 0.5),
+        "r2": float(r2_score(score_targets_arr, score_preds_arr)) if len(score_targets_arr) > 1 else None,
+        "caveat": (
+            "These metrics measure agreement with config.CLASS_TARGET_MAP's heuristic "
+            "anchor values, NOT real biological ground truth -- no expert-scored 0-10 "
+            "dataset exists yet."
+        ),
+    }
+
+    # Raw ECE (uncalibrated, T=1) always reported.
+    cat_confidences = np.array(cat_probs).max(axis=1)
+    cat_correct = (np.array(cat_preds) == np.array(cat_labels)).astype(float)
+    ece_raw = compute_ece(cat_confidences, cat_correct)
+    calibration_result = {"ece_raw": ece_raw}
+
+    calibration_path = config.checkpoints_dir / "calibration.json"
+    if calibration_path.exists():
+        calibration_data = json.loads(calibration_path.read_text())
+        calibration_result["ece_calibrated"] = calibration_data.get("ece_after")
+        calibration_result["temperature"] = calibration_data.get("temperature")
+    else:
+        calibration_result["note"] = "Run `python -m src.calibrate` to fit temperature scaling and report calibrated ECE."
+
+    logger.info("Category accuracy: %.4f | ECE (raw): %.4f", category_result["accuracy"], ece_raw)
+    if "accuracy" in condition_result:
+        logger.info("Condition accuracy (non-Healthy only): %.4f", condition_result["accuracy"])
+    logger.info("Score MAE: %.3f RMSE: %.3f", score_result["mae"], score_result["rmse"])
+
+    config.reports_dir.mkdir(parents=True, exist_ok=True)
+    _save_confusion_matrix(category_result["confusion_matrix"], category_names, config.reports_dir / "confusion_matrix_category.png", "Category confusion matrix")
+    if "confusion_matrix" in condition_result:
+        _save_confusion_matrix(condition_result["confusion_matrix"], condition_names, config.reports_dir / "confusion_matrix_condition.png", "Condition confusion matrix (non-Healthy only)")
+
+    # Score scatter: predicted vs. target.
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(score_targets_arr, score_preds_arr, alpha=0.5, s=15)
+    ax.plot([config.score_min, config.score_max], [config.score_min, config.score_max], linestyle="--", color="gray")
+    ax.set_xlabel("Anchor target score")
+    ax.set_ylabel("Predicted score")
+    ax.set_title("Health score: predicted vs. anchor target")
+    fig.tight_layout()
+    fig.savefig(config.reports_dir / "score_scatter.png", dpi=150)
+    plt.close(fig)
+
+    # Score strip plot grouped by original raw class, to visually confirm the
+    # model produces a graded spread within each folder rather than 6
+    # constant clusters (verifies the anchor-jitter technique worked).
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for i, raw_name in enumerate(config.class_names):
+        ys = [p for p, c in zip(score_preds_all, raw_class_all) if c == raw_name]
+        xs = np.random.normal(i, 0.05, size=len(ys))
+        ax.scatter(xs, ys, alpha=0.5, s=15)
+    ax.set_xticks(range(len(config.class_names)))
+    ax.set_xticklabels(config.class_names, rotation=45)
+    ax.set_ylabel("Predicted score")
+    ax.set_title("Predicted score spread by raw dataset folder")
+    fig.tight_layout()
+    fig.savefig(config.reports_dir / "score_by_raw_class.png", dpi=150)
+    plt.close(fig)
+
+    results = {
+        "category": category_result,
+        "condition": condition_result,
+        "score": score_result,
+        "calibration": calibration_result,
     }
 
     results_path = config.reports_dir / "evaluation_results.json"
     results_path.write_text(json.dumps(results, indent=2))
     logger.info("Saved evaluation results -> %s", results_path)
-    logger.info("Saved confusion matrix -> %s", cm_path)
 
     return results
 

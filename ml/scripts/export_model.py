@@ -22,7 +22,7 @@ from src.utils.seed import get_device  # noqa: E402
 def main() -> None:
     device = get_device(config.device)
     checkpoint_path = config.checkpoints_dir / "best_model.pt"
-    model, class_names = load_checkpoint(checkpoint_path, device)
+    model, category_names, condition_names = load_checkpoint(checkpoint_path, device)
 
     dummy_input = torch.randn(1, 3, config.image_size, config.image_size, device=device)
     out_path = config.checkpoints_dir / "health_classifier.onnx"
@@ -32,16 +32,21 @@ def main() -> None:
         dummy_input,
         str(out_path),
         input_names=["image"],
-        output_names=["logits"],
-        dynamic_axes={"image": {0: "batch"}, "logits": {0: "batch"}},
+        output_names=["category_logits", "condition_logits", "health_score"],
+        dynamic_axes={
+            "image": {0: "batch"},
+            "category_logits": {0: "batch"},
+            "condition_logits": {0: "batch"},
+            "health_score": {0: "batch"},
+        },
         opset_version=17,
     )
 
-    labels_path = config.checkpoints_dir / "class_names.json"
-    labels_path.write_text(json.dumps(class_names, indent=2))
+    labels_path = config.checkpoints_dir / "labels.json"
+    labels_path.write_text(json.dumps({"category_names": category_names, "condition_names": condition_names}, indent=2))
 
     print(f"Exported ONNX model -> {out_path}")
-    print(f"Saved class order -> {labels_path}")
+    print(f"Saved category/condition names -> {labels_path}")
 
 
 if __name__ == "__main__":

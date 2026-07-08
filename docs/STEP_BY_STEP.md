@@ -37,7 +37,7 @@ Already done in this repo:
 
 - [x] Repository structure (`apps/web`, `ml`, `docs`)
 - [x] Python environment defined (`ml/requirements.txt`)
-- [x] Dataset folder structure (`ml/dataset/{train,validation,test}/<7 classes>`)
+- [x] Dataset folder structure (`ml/dataset/<species_slug>/{train,validation,test}/<6 classes>`)
 - [x] Logging (`ml/src/utils/logger.py`)
 - [x] Reproducibility via fixed seeds (`ml/src/utils/seed.py`, `config.py: seed=42`)
 
@@ -64,8 +64,8 @@ labeling anything. Consistent labels matter more than volume.
 Photo datasets grow large fast and don't belong in git history. Instead, the
 labeled dataset is a **Kaggle Dataset**, synced with
 `ml/scripts/kaggle_sync.py`. `.gitignore` already excludes the actual image
-files under `ml/dataset/{train,validation,test}/<Class>/` — only the folder
-structure (`.gitkeep`) is committed.
+files under `ml/dataset/<species_slug>/{train,validation,test}/<Class>/` —
+only the folder structure (`.gitkeep`) is committed.
 
 **One-time setup:**
 
@@ -90,17 +90,23 @@ structure (`.gitkeep`) is committed.
   python scripts/split_dataset.py --source /path/to/raw
   ```
 
-  Copies files into `dataset/{train,validation,test}/<Class>/` using a
-  fixed-seed 70/15/15 split (reproducible — re-running with the same source
-  files and seed gives the same split every time).
+  Copies files into `dataset/<species_slug>/{train,validation,test}/<Class>/`
+  (path comes from `config.dataset_dir`, currently `kappaphycus_alvarezii`)
+  using a fixed-seed 70/15/15 split (reproducible — re-running with the same
+  source files and seed gives the same split every time).
 
 - **You're adding photos incrementally.** Drop them directly into
-  `ml/dataset/train/<ClassName>/`, `validation/<ClassName>/`, and
-  `test/<ClassName>/` yourself, keeping roughly a 70/15/15 ratio per class.
+  `ml/dataset/kappaphycus_alvarezii/train/<ClassName>/`,
+  `validation/<ClassName>/`, and `test/<ClassName>/` yourself, keeping
+  roughly a 70/15/15 ratio per class.
 
-Class folder names (must match exactly): `Healthy`, `Moderate`, `Low`,
+Raw class folder names (must match exactly): `Healthy`, `Moderate`, `Low`,
 `Decay`, `Dried`, `Disease` (6 classes for now — `Predator` was dropped until
 real grazing photos are available; see `docs/DATASET_LABELING_GUIDE.md`).
+These are remapped at load time into the category/condition/health-score
+taxonomy the model predicts — see `docs/DATASET_LABELING_GUIDE.md`'s
+"From raw class to category/condition/score" section and `config.py`'s
+`CLASS_TARGET_MAP`.
 
 **Push the dataset to Kaggle** (first time creates it, every time after that
 pushes a new version — Kaggle keeps the version history for you):
@@ -168,12 +174,17 @@ Already implemented in `ml/src/models/efficientnet.py`:
 
 - Transfer learning from `EfficientNet-B0` pretrained on ImageNet (per spec:
   best accuracy/size tradeoff for the first model — not trained from
-  scratch).
-- `build_model(num_classes, freeze_backbone=True)` freezes the pretrained
-  backbone and swaps in a fresh classifier head sized for the 7 health
-  classes.
-- `unfreeze_backbone()` is called after the head has stabilized, to fine-tune
-  the whole network.
+  scratch), shared by three heads:
+  - **category** (3-way: Healthy/Moderate/Low)
+  - **condition** (4-way: None/Dried/Decayed/Diseased — only trained/trusted
+    when category != Healthy)
+  - **health score** (scalar, `sigmoid(x) * 10`, regressed against the
+    heuristic anchors in `config.CLASS_TARGET_MAP`)
+- `build_multihead_model(num_categories, num_conditions,
+  freeze_backbone=True)` freezes the pretrained backbone and attaches fresh
+  heads sized for the category/condition taxonomy.
+- `unfreeze_backbone()` is called after the heads have stabilized, to
+  fine-tune the whole network.
 
 To try a different backbone later (`EfficientNetV2-S`, `ConvNeXt-Tiny`,
 `MobileNetV3`), that's the only file to change — the training loop doesn't
@@ -190,21 +201,23 @@ cd ml
 python -m src.train
 ```
 
-This runs the two-phase schedule from `config.py`:
+This runs the two-phase schedule from `config.py`, training all three heads
+jointly (category cross-entropy + masked condition cross-entropy + score
+SmoothL1, weighted by `config.loss_weights`):
 
-1. **Frozen phase** (`frozen_epochs`, default 10): only the classifier head
-   trains.
+1. **Frozen phase** (`frozen_epochs`, default 10): only the three heads
+   train.
 2. **Fine-tune phase** (`finetune_epochs`, default 20): backbone unfrozen,
    whole network trains at a lower learning rate.
 
 Early stopping (`early_stopping_patience`, default 6 epochs with no
-improvement) applies independently within each phase. The best checkpoint
-(lowest validation loss) is saved to `ml/checkpoints/best_model.pt`, along
-with the exact class-index order the model was trained with — always decode
-predictions using that saved order, not `config.CLASS_NAMES`' display order
-(see the comment in `src/data/dataset.py` for why).
+improvement on total val loss) applies independently within each phase. The
+best checkpoint (lowest validation loss) is saved to
+`ml/checkpoints/best_model.pt`, along with the exact category/condition name
+order the model was trained with.
 
-Logs go to `ml/logs/train.log` as well as the console.
+Logs go to `ml/logs/train.log` as well as the console, including per-head
+loss and accuracy/MAE each epoch.
 
 ### 4.2 Evaluate
 
@@ -212,17 +225,42 @@ Logs go to `ml/logs/train.log` as well as the console.
 python -m src.evaluate
 ```
 
-Produces, per the spec's "don't rely only on accuracy" requirement:
+Produces, per the spec's "don't rely only on accuracy" requirement, one
+section per head:
 
-- Accuracy, macro/weighted precision, recall, F1
-- Per-class accuracy, precision, recall, F1
-- Confusion matrix image → `ml/reports/confusion_matrix.png`
-- One-vs-rest ROC AUC per class (when the test split has enough samples)
+- **Category**: accuracy, macro/weighted precision/recall/F1, per-class
+  breakdown, confusion matrix → `ml/reports/confusion_matrix_category.png`,
+  one-vs-rest ROC AUC.
+- **Condition**: same metrics, computed only on non-Healthy test samples →
+  `ml/reports/confusion_matrix_condition.png`.
+- **Score**: MAE/RMSE/R² against the heuristic anchor targets (explicitly
+  labeled as agreement-with-heuristic, not biological ground truth), plus
+  `ml/reports/score_scatter.png` and `ml/reports/score_by_raw_class.png`.
+- **Calibration**: raw (uncalibrated) Expected Calibration Error always;
+  calibrated ECE too once `python -m src.calibrate` has been run (see below).
 - Full results JSON → `ml/reports/evaluation_results.json`
 
 Use the per-class breakdown to see which classes need more data — e.g. if
 `Disease` sits at 81% while `Dried` is at 99%, that's a signal to collect more
 `Disease` photos, not to tune hyperparameters further.
+
+### 4.3 Check whether "confidence" is trustworthy
+
+```bash
+python -m src.calibrate
+```
+
+The category head's raw `confidence` is a genuine softmax probability from
+the trained model — not fabricated — but an uncalibrated softmax can still be
+overconfident (80%-confidence predictions that are only right 60% of the
+time, for example). This command fits a temperature-scaling calibration on
+the validation split, then reports Expected Calibration Error (ECE) on the
+held-out test split before and after, saving
+`ml/reports/reliability_diagram_before.png` /
+`_after.png` and `ml/checkpoints/calibration.json`. Once that file exists,
+the inference API also returns `confidence_calibrated`. Re-run this after
+every retrain — it's the repeatable check that confidence numbers mean what
+they claim to.
 
 ---
 
@@ -233,9 +271,11 @@ python -m src.gradcam path/to/photo.jpg
 ```
 
 Saves `photo.gradcam.png` next to the input — a heatmap over the regions
-that most influenced the prediction. Grad-CAM is also wired into the
-inference API (Milestone 6) so every prediction returned to the app includes
-its heatmap, not just a bare label.
+that most influenced the **category** prediction (Grad-CAM needs a single
+logits tensor; `src/gradcam.py` wraps the multi-head model to expose just
+that head). Grad-CAM is also wired into the inference API (Milestone 6) so
+every prediction returned to the app includes its heatmap, not just a bare
+label.
 
 Inspect both correct and incorrect predictions on the test set (not just
 random samples) — misclassifications with a highlighted region make it
@@ -253,15 +293,22 @@ uvicorn src.api.main:app --reload --port 8000
 
 Endpoints:
 
-- `GET /health` → `{status, model_loaded, classes}`
+- `GET /health` → `{status, model_loaded, category_names, condition_names}`
 - `POST /predict` → multipart form with a `file` field, returns:
 
 ```json
 {
   "species": "Kappaphycus alvarezii",
-  "health": "Moderate",
+  "category": "Moderate",
+  "condition": null,
+  "health_score": 6.2,
   "confidence": 0.974,
-  "explanation": "Minor bleaching on branches and early tissue degradation observed.",
+  "confidence_calibrated": 0.911,
+  "explanation_bullets": [
+    "Slight whitening visible on branch tips",
+    "Small areas of tissue loss present",
+    "Thallus still appears to be actively growing"
+  ],
   "recommendation": "Increase water movement. Inspect for grazers and early disease signs.",
   "gradcam_png_base64": "..."
 }
@@ -275,8 +322,16 @@ curl -F "file=@/path/to/photo.jpg" http://localhost:8000/predict
 
 The response shape already includes `species` so that real species
 identification (Milestone 7+/long-term) slots in without a breaking change —
-today it's a constant (`SPECIES_NAME` in `src/inference/predictor.py`)
-because Phase 1 supports only one species.
+today it's a constant (`config.SPECIES_DISPLAY_NAME`, sourced by
+`src/inference/predictor.py`) because Phase 1 supports only one species.
+`confidence_calibrated` is `null` until `python -m src.calibrate` has been
+run at least once (see Milestone 4.3) — an honest signal that calibration
+hasn't been checked yet, rather than a silently wrong number.
+
+**Breaking change note:** this response shape replaced an earlier flat
+`{health, confidence, explanation}` shape. `apps/web`'s result card and its
+`/api/predict` proxy route have not been updated to match yet — that's a
+separate, still-open follow-up task.
 
 ---
 
@@ -297,6 +352,13 @@ overlay. The app's `/api/predict` route (`src/app/api/predict/route.ts`)
 proxies the upload to the Python service — the browser never talks to the ML
 API directly.
 
+**Currently stale:** the frontend above expects the older
+`{health, confidence, explanation}` response shape. The API now returns
+`{category, condition, health_score, confidence, confidence_calibrated,
+explanation_bullets, ...}` (see Milestone 6) — `apps/web`'s types/result
+card/proxy route need a follow-up update before this step will work again
+end-to-end.
+
 Already verified working in this scaffold: `npm install`, `npm run
 typecheck`, and `npm run build` all pass cleanly.
 
@@ -316,9 +378,12 @@ Replace the placeholders referenced in `apps/web/public/manifest.webmanifest`
      id uuid primary key default gen_random_uuid(),
      created_at timestamptz default now(),
      species text not null,
-     health text not null,
+     category text not null,
+     condition text,
+     health_score numeric not null,
      confidence numeric not null,
-     explanation text,
+     confidence_calibrated numeric,
+     explanation_bullets text[],
      recommendation text,
      image_path text,
      gps point,
@@ -368,9 +433,10 @@ TensorFlow Lite or CoreML for native mobile builds later.
 - [ ] Dataset pushed to Kaggle (`kaggle_sync.py init`/`push`) and/or pulled down (`kaggle_sync.py download`)
 - [ ] `python -m src.data.validate_dataset` reports no missing/corrupt files
 - [ ] `python -m src.train` completes, `ml/checkpoints/best_model.pt` exists
-- [ ] `python -m src.evaluate` produces `ml/reports/evaluation_results.json` and a confusion matrix
+- [ ] `python -m src.evaluate` produces `ml/reports/evaluation_results.json` and per-head confusion matrices
+- [ ] `python -m src.calibrate` produces `ml/checkpoints/calibration.json` and before/after reliability diagrams
 - [ ] `uvicorn src.api.main:app --port 8000` serves `/health` and `/predict`
-- [ ] `apps/web`: `npm install && npm run dev` runs, uploads a photo, and renders a result
+- [ ] `apps/web`: currently expects the pre-multi-head response shape — needs a follow-up update before `npm run dev` renders a result correctly again (see Milestone 6/7.1)
 
 ---
 
@@ -407,9 +473,12 @@ Roadmap, in the order the spec recommends tackling them:
    `/predict/species` (or a combined pipeline) endpoint. Becomes the first
    stage once more species are supported (`Eucheuma denticulatum`,
    `Gracilaria`, `Ulva`, `Sargassum`).
-2. **Disease Model** — runs only when `health != Healthy`. New classifier,
+2. **Disease Model** — runs only when `category != Healthy`. New classifier,
    outputs e.g. `Ice-Ice Disease`, `Epiphyte Infection`, `Bacterial Disease`,
-   `Unknown`.
+   `Unknown`. Note this is a deeper drill-down than today's lightweight
+   `condition` tag (`Dried`/`Decayed`/`Diseased`) on the health classifier —
+   this future model would fire specifically when `condition == "Diseased"`
+   to identify *which* disease.
 3. **Predator Model** — same trigger condition, outputs e.g. `Rabbitfish`,
    `Sea Urchin`, `Parrotfish`, `Crab`, `Unknown`.
 4. **Damage/Decay Estimation** — not a classifier: image → segmentation
