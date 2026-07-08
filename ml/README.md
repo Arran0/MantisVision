@@ -11,12 +11,13 @@ pinned: false
 # Mantis Vision — ML Pipeline
 
 Multi-head health classifier for *Kappaphycus alvarezii* (Phase 1 / MVP): a
-shared EfficientNet-B0 backbone with three heads — health **category**
+shared EfficientNet-B0 backbone with five heads — health **category**
 (Healthy/Moderate/Low), **condition** (None/Dried/Decayed/Diseased, only
-meaningful when category != Healthy), and a **health score** regressed to
-0–10. See [`../docs/STEP_BY_STEP.md`](../docs/STEP_BY_STEP.md) for the full
-walkthrough; this file is the quick reference once you already know the
-pipeline.
+meaningful when category != Healthy), a **health score** regressed to 0–10,
+**disease subtype** (only meaningful when condition == Diseased), and
+**dried%/decayed% extent**. See [`../docs/STEP_BY_STEP.md`](../docs/STEP_BY_STEP.md)
+for the full walkthrough; this file is the quick reference once you already
+know the pipeline.
 
 The YAML block above is Hugging Face Spaces' config header — when this
 folder is deployed as a Space (see
@@ -29,23 +30,26 @@ inert everywhere else (GitHub just renders it as a normal README).
 ```
 ml/
   config.py              # single source of truth: paths, hyperparams, category/condition/
-                          # score-anchor taxonomy (config.CLASS_TARGET_MAP), species slug
+                          # score/extent taxonomy (config.CLASS_TARGET_MAP +
+                          # parse_disease_folder), disease subtype list, species slug
   dataset/
     <species_slug>/        # e.g. kappaphycus_alvarezii/ — train/validation/test/<Class>/
                             # images, lives on Kaggle, gitignored here. Species-scoped so a
                             # second species can be added as a sibling folder later.
+                            # <Class> is one of the 5 fixed classes, or a
+                            # Disease_<Severity>[_<Subtype>] folder.
   checkpoints/             # saved model weights + calibration.json (gitignored)
-  reports/                 # evaluation outputs: confusion matrices, score plots, reliability
-                            # diagrams, metrics json (gitignored)
+  reports/                 # evaluation outputs: confusion matrices, score/extent plots,
+                            # reliability diagrams, metrics json (gitignored)
   logs/                    # run logs (gitignored)
   metadata/labels_template.csv
   src/
-    data/                  # transforms, ImageFolder dataloaders wrapped into 3 training
-                            # targets (category/condition/score) via CLASS_TARGET_MAP,
-                            # dataset validation CLI
+    data/                  # transforms, ImageFolder dataloaders wrapped into training
+                            # targets (category/condition/score/disease_subtype/extent) via
+                            # config.resolve_class_target, dataset validation CLI
     models/efficientnet.py # multi-head transfer-learning model + checkpoint save/load
     train.py               # two-phase training (frozen heads -> fine-tune) with early stopping
-    evaluate.py            # per-head metrics (category/condition/score) + calibration section
+    evaluate.py            # per-head metrics (all 5 heads) + calibration section
     calibration.py         # ECE, temperature scaling, reliability diagrams
     calibrate.py           # CLI: fits + checks confidence calibration, writes calibration.json
     gradcam.py             # Grad-CAM explainability (category head)
@@ -89,12 +93,17 @@ uvicorn src.api.main:app --reload --port 8000
 python scripts/export_model.py
 ```
 
-Raw class labels (folder names must match exactly): `Healthy`, `Moderate`,
-`Low`, `Decay`, `Dried`, `Disease`. These are remapped at load time via
-`config.CLASS_TARGET_MAP` into the taxonomy the model actually predicts —
-category (`Healthy`/`Moderate`/`Low`) + condition
-(`None`/`Dried`/`Decayed`/`Diseased`) + a heuristic 0–10 health-score anchor.
-Labeling standards for the raw classes are in
+Raw class labels (folder names must match exactly): 5 fixed classes —
+`Healthy`, `Moderate`, `Low`, `Decay`, `Dried` — plus any number of
+`Disease_<Severity>[_<Subtype>]` folders (`Severity` in `Moderate`/`Low`,
+`Subtype` in `config.DISEASE_SUBTYPE_NAMES`, e.g. `Disease_Moderate_IceIce`).
+These are remapped at load time via `config.resolve_class_target` into the
+taxonomy the model actually predicts — category (`Healthy`/`Moderate`/`Low`)
++ condition (`None`/`Dried`/`Decayed`/`Diseased`) + disease subtype (only
+meaningful when condition == Diseased) + a heuristic 0–10 health-score
+anchor + heuristic dried%/decayed% extent anchors. Unlike Decay/Dried,
+Disease severity is folder-encoded rather than fixed, since a diseased
+specimen isn't always Low-severity. Labeling standards are in
 [`../docs/DATASET_LABELING_GUIDE.md`](../docs/DATASET_LABELING_GUIDE.md).
 
 **Is the confidence real?** Yes — `confidence` is a genuine softmax

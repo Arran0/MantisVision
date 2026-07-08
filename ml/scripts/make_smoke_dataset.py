@@ -23,14 +23,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import config  # noqa: E402
 
 # Rough base color per raw class, chosen loosely to match the labeling guide
-# (green=healthy, brown=decay/dry, etc.) — not meant to be realistic.
+# (green=healthy, brown=decay/dry, etc.) — not meant to be realistic. Disease
+# folders use the compound Disease_<Severity>[_<Subtype>] naming convention;
+# a handful of representative combos are enough to exercise the masked
+# disease_subtype loss without requiring every severity/subtype pairing.
 BASE_COLORS = {
     "Healthy": (60, 160, 70),
     "Moderate": (150, 180, 90),
     "Low": (170, 150, 110),
     "Decay": (110, 80, 50),
     "Dried": (210, 205, 190),
-    "Disease": (140, 100, 120),
+    "Disease_Moderate_Unknown": (150, 110, 130),
+    "Disease_Moderate_IceIce": (170, 120, 140),
+    "Disease_Low_Unknown": (120, 90, 110),
+    "Disease_Low_Bacterial": (130, 80, 100),
 }
 
 SPLIT_COUNTS = {"train": 1.0, "validation": 0.3, "test": 0.3}  # relative to --per-class
@@ -54,10 +60,9 @@ def main() -> None:
 
     for split, ratio in SPLIT_COUNTS.items():
         n = max(int(args.per_class * ratio), 3)
-        for class_name in config.class_names:
+        for class_name, base_color in BASE_COLORS.items():
             class_dir = root / split / class_name
             class_dir.mkdir(parents=True, exist_ok=True)
-            base_color = BASE_COLORS[class_name]
             for i in range(n):
                 image = make_image(base_color, config.image_size, rng)
                 image.save(class_dir / f"{class_name.lower()}_{i:03d}.png")

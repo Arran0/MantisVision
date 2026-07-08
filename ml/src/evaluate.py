@@ -8,11 +8,15 @@ Reports metrics per head, per spec: never judge the model on accuracy alone.
     not Healthy (the condition head is never trained on Healthy samples —
     see src/train.py — so including them would trivially inflate accuracy
     with an "always None" shortcut).
+  - disease_subtype: same metrics, computed only on samples whose condition
+    is "Diseased" (undefined otherwise, masked at training time too).
   - score: MAE/RMSE/R^2 against the heuristic anchor targets, plus a
     scatter plot and a per-raw-class strip plot. IMPORTANT CAVEAT: these
-    numbers measure agreement with config.CLASS_TARGET_MAP's anchor values,
-    NOT real biological ground truth — no expert-scored 0-10 dataset exists
-    yet (see config.py's anchor justification comments).
+    numbers measure agreement with config.resolve_class_target's anchor
+    values, NOT real biological ground truth — no expert-scored 0-10 dataset
+    exists yet (see config.py's anchor justification comments).
+  - extent (dried%/decayed%): same caveat — MAE/RMSE against heuristic
+    anchors, not pixel-level/segmentation ground truth.
   - calibration: raw (uncalibrated) ECE is always reported. If
     `checkpoints/calibration.json` exists (produced by `python -m
     src.calibrate`), the calibrated ECE is reported alongside it.
@@ -41,7 +45,7 @@ from sklearn.metrics import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import CLASS_TARGET_MAP, config  # noqa: E402
+from config import config  # noqa: E402
 from src.calibration import compute_ece  # noqa: E402
 from src.data.dataset import get_multihead_dataloaders  # noqa: E402
 from src.models.efficientnet import load_checkpoint  # noqa: E402
@@ -98,42 +102,65 @@ def evaluate(checkpoint_path: Path | None = None) -> dict:
     logger = get_logger("evaluate", config.logs_dir)
 
     checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
-    model, category_names, condition_names = load_checkpoint(checkpoint_path, device)
-    logger.info("Loaded checkpoint %s (categories=%s, conditions=%s)", checkpoint_path, category_names, condition_names)
+    model, category_names, condition_names, disease_subtype_names = load_checkpoint(checkpoint_path, device)
+    logger.info(
+        "Loaded checkpoint %s (categories=%s, conditions=%s, disease_subtypes=%s)",
+        checkpoint_path, category_names, condition_names, disease_subtype_names,
+    )
 
-    data = get_multihead_dataloaders(config, CLASS_TARGET_MAP)
+    data = get_multihead_dataloaders(config)
     assert data.category_names == category_names, "Checkpoint category order does not match dataset."
     assert data.condition_names == condition_names, "Checkpoint condition order does not match dataset."
+    assert data.disease_subtype_names == disease_subtype_names, "Checkpoint disease-subtype order does not match dataset."
     healthy_idx = category_names.index("Healthy")
+    diseased_idx = condition_names.index("Diseased")
 
     cat_labels, cat_preds, cat_probs = [], [], []
     cond_labels, cond_preds, cond_probs = [], [], []
+    subtype_labels, subtype_preds, subtype_probs = [], [], []
     score_targets_all, score_preds_all, raw_class_all = [], [], []
+    extent_targets_all, extent_preds_all = [], []
 
     # raw_class per sample is recovered from the underlying ImageFolder so the
-    # score scatter/strip plots can be grouped by the original 6 folders.
+    # score scatter/strip plots can be grouped by the original raw folders.
     raw_classes = data.test.dataset.image_folder.classes
 
     with torch.no_grad():
         idx = 0
-        for images, category_batch, condition_batch, score_batch in data.test:
+        for images, targets in data.test:
             images = images.to(device)
-            category_logits, condition_logits, score_pred = model(images)
+            category_batch = targets["category"]
+            condition_batch = targets["condition"]
+            score_batch = targets["score"]
+            subtype_batch = targets["disease_subtype"]
+            extent_batch = targets["extent"]
+
+            category_logits, condition_logits, score_pred, subtype_logits, extent_pred = model(images)
             cat_p = F.softmax(category_logits, dim=1).cpu().numpy()
             cond_p = F.softmax(condition_logits, dim=1).cpu().numpy()
+            subtype_p = F.softmax(subtype_logits, dim=1).cpu().numpy()
 
             cat_labels.extend(category_batch.numpy().tolist())
             cat_preds.extend(cat_p.argmax(axis=1).tolist())
             cat_probs.extend(cat_p.tolist())
 
-            mask = (category_batch != healthy_idx).numpy()
-            if mask.any():
-                cond_labels.extend(condition_batch.numpy()[mask].tolist())
-                cond_preds.extend(cond_p.argmax(axis=1)[mask].tolist())
-                cond_probs.extend(cond_p[mask].tolist())
+            cond_mask = (category_batch != healthy_idx).numpy()
+            if cond_mask.any():
+                cond_labels.extend(condition_batch.numpy()[cond_mask].tolist())
+                cond_preds.extend(cond_p.argmax(axis=1)[cond_mask].tolist())
+                cond_probs.extend(cond_p[cond_mask].tolist())
+
+            subtype_mask = (condition_batch == diseased_idx).numpy()
+            if subtype_mask.any():
+                subtype_labels.extend(subtype_batch.numpy()[subtype_mask].tolist())
+                subtype_preds.extend(subtype_p.argmax(axis=1)[subtype_mask].tolist())
+                subtype_probs.extend(subtype_p[subtype_mask].tolist())
 
             score_targets_all.extend(score_batch.numpy().tolist())
             score_preds_all.extend(score_pred.cpu().numpy().tolist())
+            extent_targets_all.extend(extent_batch.numpy().tolist())
+            extent_preds_all.extend(extent_pred.cpu().numpy().tolist())
+
             batch_size = images.size(0)
             raw_class_all.extend(
                 raw_classes[data.test.dataset.image_folder.samples[i][1]] for i in range(idx, idx + batch_size)
@@ -146,6 +173,11 @@ def evaluate(checkpoint_path: Path | None = None) -> dict:
         if cond_labels
         else {"note": "No non-Healthy samples in test split."}
     )
+    subtype_result = (
+        _head_report(np.array(subtype_labels), np.array(subtype_preds), np.array(subtype_probs), disease_subtype_names)
+        if subtype_labels
+        else {"note": "No Diseased-condition samples in test split."}
+    )
 
     score_targets_arr = np.array(score_targets_all)
     score_preds_arr = np.array(score_preds_all)
@@ -154,9 +186,26 @@ def evaluate(checkpoint_path: Path | None = None) -> dict:
         "rmse": float(mean_squared_error(score_targets_arr, score_preds_arr) ** 0.5),
         "r2": float(r2_score(score_targets_arr, score_preds_arr)) if len(score_targets_arr) > 1 else None,
         "caveat": (
-            "These metrics measure agreement with config.CLASS_TARGET_MAP's heuristic "
+            "These metrics measure agreement with config.resolve_class_target's heuristic "
             "anchor values, NOT real biological ground truth -- no expert-scored 0-10 "
             "dataset exists yet."
+        ),
+    }
+
+    extent_targets_arr = np.array(extent_targets_all)  # [N, 2] = (dried_pct, decayed_pct)
+    extent_preds_arr = np.array(extent_preds_all)
+    extent_result = {
+        "dried_pct": {
+            "mae": float(mean_absolute_error(extent_targets_arr[:, 0], extent_preds_arr[:, 0])),
+            "rmse": float(mean_squared_error(extent_targets_arr[:, 0], extent_preds_arr[:, 0]) ** 0.5),
+        },
+        "decayed_pct": {
+            "mae": float(mean_absolute_error(extent_targets_arr[:, 1], extent_preds_arr[:, 1])),
+            "rmse": float(mean_squared_error(extent_targets_arr[:, 1], extent_preds_arr[:, 1]) ** 0.5),
+        },
+        "caveat": (
+            "These metrics measure agreement with heuristic per-class dried%/decayed% anchors, "
+            "NOT pixel-level/segmentation ground truth -- no such dataset exists yet."
         ),
     }
 
@@ -177,12 +226,20 @@ def evaluate(checkpoint_path: Path | None = None) -> dict:
     logger.info("Category accuracy: %.4f | ECE (raw): %.4f", category_result["accuracy"], ece_raw)
     if "accuracy" in condition_result:
         logger.info("Condition accuracy (non-Healthy only): %.4f", condition_result["accuracy"])
+    if "accuracy" in subtype_result:
+        logger.info("Disease subtype accuracy (Diseased only): %.4f", subtype_result["accuracy"])
     logger.info("Score MAE: %.3f RMSE: %.3f", score_result["mae"], score_result["rmse"])
+    logger.info(
+        "Extent MAE -- dried: %.2f decayed: %.2f",
+        extent_result["dried_pct"]["mae"], extent_result["decayed_pct"]["mae"],
+    )
 
     config.reports_dir.mkdir(parents=True, exist_ok=True)
     _save_confusion_matrix(category_result["confusion_matrix"], category_names, config.reports_dir / "confusion_matrix_category.png", "Category confusion matrix")
     if "confusion_matrix" in condition_result:
         _save_confusion_matrix(condition_result["confusion_matrix"], condition_names, config.reports_dir / "confusion_matrix_condition.png", "Condition confusion matrix (non-Healthy only)")
+    if "confusion_matrix" in subtype_result:
+        _save_confusion_matrix(subtype_result["confusion_matrix"], disease_subtype_names, config.reports_dir / "confusion_matrix_disease_subtype.png", "Disease subtype confusion matrix (Diseased only)")
 
     # Score scatter: predicted vs. target.
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -195,16 +252,30 @@ def evaluate(checkpoint_path: Path | None = None) -> dict:
     fig.savefig(config.reports_dir / "score_scatter.png", dpi=150)
     plt.close(fig)
 
-    # Score strip plot grouped by original raw class, to visually confirm the
-    # model produces a graded spread within each folder rather than 6
-    # constant clusters (verifies the anchor-jitter technique worked).
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for i, raw_name in enumerate(config.class_names):
+    # Extent scatter: predicted vs. target, one subplot per dried/decayed.
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+    for i, (ax, label) in enumerate(zip(axes, ["Dried %", "Decayed %"])):
+        ax.scatter(extent_targets_arr[:, i], extent_preds_arr[:, i], alpha=0.5, s=15)
+        ax.plot([config.pct_min, config.pct_max], [config.pct_min, config.pct_max], linestyle="--", color="gray")
+        ax.set_xlabel(f"Anchor target {label}")
+        ax.set_ylabel(f"Predicted {label}")
+        ax.set_title(label)
+    fig.tight_layout()
+    fig.savefig(config.reports_dir / "extent_scatter.png", dpi=150)
+    plt.close(fig)
+
+    # Score strip plot grouped by original raw class (discovered dynamically —
+    # Disease_* folders vary in number/name), to visually confirm the model
+    # produces a graded spread within each folder rather than constant
+    # clusters (verifies the anchor-jitter technique worked).
+    raw_class_order = sorted(set(raw_class_all))
+    fig, ax = plt.subplots(figsize=(max(8, len(raw_class_order) * 1.1), 5))
+    for i, raw_name in enumerate(raw_class_order):
         ys = [p for p, c in zip(score_preds_all, raw_class_all) if c == raw_name]
         xs = np.random.normal(i, 0.05, size=len(ys))
         ax.scatter(xs, ys, alpha=0.5, s=15)
-    ax.set_xticks(range(len(config.class_names)))
-    ax.set_xticklabels(config.class_names, rotation=45)
+    ax.set_xticks(range(len(raw_class_order)))
+    ax.set_xticklabels(raw_class_order, rotation=45, ha="right")
     ax.set_ylabel("Predicted score")
     ax.set_title("Predicted score spread by raw dataset folder")
     fig.tight_layout()
@@ -214,7 +285,9 @@ def evaluate(checkpoint_path: Path | None = None) -> dict:
     results = {
         "category": category_result,
         "condition": condition_result,
+        "disease_subtype": subtype_result,
         "score": score_result,
+        "extent": extent_result,
         "calibration": calibration_result,
     }
 

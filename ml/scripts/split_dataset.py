@@ -3,10 +3,13 @@
 Input layout (e.g. after bulk-labeling raw photos):
     raw/Healthy/*.jpg
     raw/Moderate/*.jpg
+    raw/Disease_Moderate_IceIce/*.jpg
     ...
 
-Output: copies files into ml/dataset/{train,validation,test}/<Class>/ using
-the 70/15/15 split from the spec, with a fixed seed for reproducibility.
+Output: copies files into ml/dataset/<species_slug>/{train,validation,test}/<Class>/
+using the 70/15/15 split from the spec, with a fixed seed for reproducibility.
+`<Class>` is one of the 5 fixed classes or a 'Disease_<Severity>[_<Subtype>]'
+folder (see config.py's resolve_class_target/parse_disease_folder).
 
 Usage:
     python scripts/split_dataset.py --source /path/to/raw
@@ -20,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import config  # noqa: E402
+from config import config, resolve_class_target  # noqa: E402
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 SPLIT_RATIOS = {"train": 0.70, "validation": 0.15, "test": 0.15}
@@ -56,8 +59,10 @@ def main() -> None:
         if not class_dir.is_dir():
             continue
         class_name = class_dir.name
-        if class_name not in config.class_names:
-            print(f"Skipping unrecognized class folder: {class_name}")
+        try:
+            resolve_class_target(class_name)
+        except ValueError as e:
+            print(f"Skipping unrecognized class folder '{class_name}': {e}")
             continue
 
         # Sorted so the seeded shuffle below is reproducible across machines —

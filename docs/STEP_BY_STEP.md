@@ -100,13 +100,14 @@ only the folder structure (`.gitkeep`) is committed.
   `validation/<ClassName>/`, and `test/<ClassName>/` yourself, keeping
   roughly a 70/15/15 ratio per class.
 
-Raw class folder names (must match exactly): `Healthy`, `Moderate`, `Low`,
-`Decay`, `Dried`, `Disease` (6 classes for now — `Predator` was dropped until
-real grazing photos are available; see `docs/DATASET_LABELING_GUIDE.md`).
-These are remapped at load time into the category/condition/health-score
-taxonomy the model predicts — see `docs/DATASET_LABELING_GUIDE.md`'s
-"From raw class to category/condition/score" section and `config.py`'s
-`CLASS_TARGET_MAP`.
+Raw class folder names (must match exactly): 5 fixed classes — `Healthy`,
+`Moderate`, `Low`, `Decay`, `Dried` — plus any number of
+`Disease_<Severity>[_<Subtype>]` folders (`Predator` was dropped until real
+grazing photos are available; see `docs/DATASET_LABELING_GUIDE.md`). These
+are remapped at load time into the category/condition/disease-subtype/health-
+score/extent taxonomy the model predicts — see
+`docs/DATASET_LABELING_GUIDE.md`'s "From raw class to category/condition/score"
+and "Disease folders" sections and `config.py`'s `resolve_class_target`.
 
 **Push the dataset to Kaggle** (first time creates it, every time after that
 pushes a new version — Kaggle keeps the version history for you):
@@ -174,15 +175,19 @@ Already implemented in `ml/src/models/efficientnet.py`:
 
 - Transfer learning from `EfficientNet-B0` pretrained on ImageNet (per spec:
   best accuracy/size tradeoff for the first model — not trained from
-  scratch), shared by three heads:
+  scratch), shared by five heads:
   - **category** (3-way: Healthy/Moderate/Low)
   - **condition** (4-way: None/Dried/Decayed/Diseased — only trained/trusted
     when category != Healthy)
   - **health score** (scalar, `sigmoid(x) * 10`, regressed against the
-    heuristic anchors in `config.CLASS_TARGET_MAP`)
-- `build_multihead_model(num_categories, num_conditions,
+    heuristic anchors from `config.resolve_class_target`)
+  - **disease subtype** (N-way: Unknown/IceIce/Epiphyte/Bacterial — only
+    trained/trusted when condition == Diseased)
+  - **extent** (2 scalars, `sigmoid(x) * 100`: dried%/decayed%, regressed
+    against heuristic per-class anchors)
+- `build_multihead_model(num_categories, num_conditions, num_disease_subtypes,
   freeze_backbone=True)` freezes the pretrained backbone and attaches fresh
-  heads sized for the category/condition taxonomy.
+  heads sized for the taxonomy.
 - `unfreeze_backbone()` is called after the heads have stabilized, to
   fine-tune the whole network.
 
@@ -233,16 +238,21 @@ section per head:
   one-vs-rest ROC AUC.
 - **Condition**: same metrics, computed only on non-Healthy test samples →
   `ml/reports/confusion_matrix_condition.png`.
+- **Disease subtype**: same metrics, computed only on Diseased-condition
+  test samples → `ml/reports/confusion_matrix_disease_subtype.png`.
 - **Score**: MAE/RMSE/R² against the heuristic anchor targets (explicitly
   labeled as agreement-with-heuristic, not biological ground truth), plus
   `ml/reports/score_scatter.png` and `ml/reports/score_by_raw_class.png`.
+- **Extent** (dried%/decayed%): same caveat, MAE/RMSE against heuristic
+  anchors, plus `ml/reports/extent_scatter.png`.
 - **Calibration**: raw (uncalibrated) Expected Calibration Error always;
   calibrated ECE too once `python -m src.calibrate` has been run (see below).
 - Full results JSON → `ml/reports/evaluation_results.json`
 
 Use the per-class breakdown to see which classes need more data — e.g. if
-`Disease` sits at 81% while `Dried` is at 99%, that's a signal to collect more
-`Disease` photos, not to tune hyperparameters further.
+`Disease_Low_Bacterial` sits at 81% recall while `Dried` is at 99%, that's a
+signal to collect more Bacterial-disease photos, not to tune hyperparameters
+further.
 
 ### 4.3 Check whether "confidence" is trustworthy
 
@@ -293,26 +303,42 @@ uvicorn src.api.main:app --reload --port 8000
 
 Endpoints:
 
-- `GET /health` → `{status, model_loaded, category_names, condition_names}`
+- `GET /health` → `{status, model_loaded, category_names, condition_names, disease_subtype_names}`
 - `POST /predict` → multipart form with a `file` field, returns:
 
 ```json
 {
   "species": "Kappaphycus alvarezii",
-  "category": "Moderate",
-  "condition": null,
-  "health_score": 6.2,
+  "category": "Low",
+  "condition": "Diseased",
+  "disease_subtype": "IceIce",
+  "health_score": 1.6,
+  "dried_percentage": 2.0,
+  "decayed_percentage": 8.0,
   "confidence": 0.974,
   "confidence_calibrated": 0.911,
   "explanation_bullets": [
-    "Slight whitening visible on branch tips",
-    "Small areas of tissue loss present",
-    "Thallus still appears to be actively growing"
+    "Significant discoloration compared to healthy tissue",
+    "Reduced branching density observed",
+    "Overall structure visibly diminished",
+    "Visible lesions on the tissue surface",
+    "Symptoms consistent with infection rather than grazing damage",
+    "Pattern doesn't match typical decay or drying",
+    "Whitish, brittle lesions typical of Ice-Ice disease",
+    "Tissue softening near the lesion site"
   ],
-  "recommendation": "Increase water movement. Inspect for grazers and early disease signs.",
+  "recommendation": "Relocate to better water flow if possible. Increase inspection frequency. Isolate affected line segments if the condition worsens. Consistent with Ice-Ice disease — check for temperature/salinity shifts and reduce handling stress.",
   "gradcam_png_base64": "..."
 }
 ```
+
+`disease_subtype` is `null` unless `condition == "Diseased"` — same masking
+logic as `condition` being `null` when `category == "Healthy"` (the
+underlying head is never trained on samples where it doesn't apply, so its
+raw output there is untrustworthy and deliberately not surfaced).
+`dried_percentage`/`decayed_percentage` are always present (0-100) but, like
+`health_score`, are a heuristic regression output — not a measured or
+segmented percentage (see `config.py`'s anchor comments).
 
 Test it directly:
 
@@ -380,7 +406,10 @@ Replace the placeholders referenced in `apps/web/public/manifest.webmanifest`
      species text not null,
      category text not null,
      condition text,
+     disease_subtype text,
      health_score numeric not null,
+     dried_percentage numeric not null,
+     decayed_percentage numeric not null,
      confidence numeric not null,
      confidence_calibrated numeric,
      explanation_bullets text[],
@@ -473,16 +502,22 @@ Roadmap, in the order the spec recommends tackling them:
    `/predict/species` (or a combined pipeline) endpoint. Becomes the first
    stage once more species are supported (`Eucheuma denticulatum`,
    `Gracilaria`, `Ulva`, `Sargassum`).
-2. **Disease Model** — runs only when `category != Healthy`. New classifier,
-   outputs e.g. `Ice-Ice Disease`, `Epiphyte Infection`, `Bacterial Disease`,
-   `Unknown`. Note this is a deeper drill-down than today's lightweight
-   `condition` tag (`Dried`/`Decayed`/`Diseased`) on the health classifier —
-   this future model would fire specifically when `condition == "Diseased"`
-   to identify *which* disease.
-3. **Predator Model** — same trigger condition, outputs e.g. `Rabbitfish`,
-   `Sea Urchin`, `Parrotfish`, `Crab`, `Unknown`.
-4. **Damage/Decay Estimation** — not a classifier: image → segmentation
-   (U-Net) → percentage of tissue damaged (e.g. "Decay: 18.7%").
+2. **Disease Model** — ✅ partially done: the health classifier's
+   `disease_subtype` head (`ml/src/models/efficientnet.py`) already outputs
+   `IceIce`/`Epiphyte`/`Bacterial`/`Unknown` when `condition == "Diseased"`,
+   trained from folder-encoded labels (`Disease_<Severity>_<Subtype>/`, see
+   `docs/DATASET_LABELING_GUIDE.md`) rather than a separate model/endpoint.
+   A dedicated deeper model (lesion-level detail, more subtypes, confidence
+   per lesion) is still future work if this shared-backbone head isn't
+   precise enough once more subtype-labeled photos exist.
+3. **Predator Model** — same trigger condition (`category != Healthy`),
+   outputs e.g. `Rabbitfish`, `Sea Urchin`, `Parrotfish`, `Crab`, `Unknown`.
+   Not yet started.
+4. **Damage/Decay Estimation** — 🟡 coarse version done: the health
+   classifier's `extent` head already regresses dried%/decayed% (heuristic
+   anchors, not real ground truth — see `config.py`). True per-pixel
+   segmentation (U-Net → percentage of tissue damaged) is still future work
+   for when accuracy beyond a whole-image heuristic estimate is needed.
 5. **Region Detection** — another segmentation model, outputs per-pixel
    `Healthy Tissue` / `Damaged Tissue` / `Predator Bite` / `Disease Spot`.
 6. **Treatment Recommendation** — currently a static lookup

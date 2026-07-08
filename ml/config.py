@@ -19,19 +19,20 @@ ML_ROOT = Path(__file__).resolve().parent
 SPECIES_SLUG = "kappaphycus_alvarezii"
 SPECIES_DISPLAY_NAME = "Kappaphycus alvarezii"
 
-# Raw dataset folder names. NOTE: torchvision's ImageFolder assigns label
-# indices by *alphabetical* folder order, not this list's order, so the
-# actual index<->label mapping used at train/inference time is
-# `train_ds.classes` (see src/data/dataset.py), persisted into every
-# checkpoint. This list just needs to contain the same set of names as the
-# dataset folders.
+# Fixed raw dataset folder names — always the same 5, always mean the same
+# thing (see CLASS_TARGET_MAP below). "Disease" is deliberately NOT in this
+# list: unlike Decay/Dried (which the labeling guide describes as inherently
+# severe, hence always category=Low), a diseased specimen can be a small
+# patch on an otherwise-Moderate specimen or a widespread Low-severity case.
+# Disease severity therefore has to come from the folder name itself — see
+# DISEASE_SEVERITIES/DISEASE_SUBTYPE_NAMES and parse_disease_folder() below —
+# rather than a single fixed anchor.
 CLASS_NAMES = [
     "Healthy",
     "Moderate",
     "Low",
     "Decay",
     "Dried",
-    "Disease",
 ]
 
 # The taxonomy the model actually predicts: a 3-way severity category plus an
@@ -39,8 +40,19 @@ CLASS_NAMES = [
 CATEGORY_NAMES = ["Healthy", "Moderate", "Low"]
 CONDITION_NAMES = ["None", "Dried", "Decayed", "Diseased"]
 
+# Disease-specific sub-taxonomy. Severity is folder-encoded (see
+# parse_disease_folder), so a diseased specimen isn't forced to Low the way
+# Decay/Dried are. Subtype starts as the 4 types already named in
+# docs/STEP_BY_STEP.md's roadmap (Ice-Ice, Epiphyte, Bacterial, plus a
+# catch-all Unknown) — extend this list once more subtypes have labeled
+# photos; it's the one place the taxonomy is defined.
+DISEASE_SEVERITIES = ["Moderate", "Low"]
+DISEASE_SUBTYPE_NAMES = ["Unknown", "IceIce", "Epiphyte", "Bacterial"]
+
 SCORE_MIN = 0.0
 SCORE_MAX = 10.0
+PCT_MIN = 0.0
+PCT_MAX = 100.0
 
 
 @dataclass(frozen=True)
@@ -48,16 +60,19 @@ class ClassTarget:
     category: str
     condition: str | None
     score_anchor: float
+    # "N/A" (not "Unknown") when condition != "Diseased" — distinguishes "this
+    # class has no disease subtype at all" from "this is a diseased sample
+    # whose specific pathogen wasn't identified" (disease_subtype head is
+    # masked to condition=="Diseased" samples during training either way).
+    disease_subtype: str = "N/A"
+    dried_pct_anchor: float = 0.0
+    decayed_pct_anchor: float = 0.0
 
 
-# Maps each raw dataset folder to (category, condition, health-score anchor).
-#
-# Confirmed decision: Decay/Dried/Disease all map to category="Low" (rather
-# than being split across Moderate/Low) because the labeling guide's own
-# definitions of all three describe severe, advanced symptoms (rot, zero
-# living tissue, active lesions) consistent with the Low tier — no dataset
-# currently distinguishes a "moderate-severity dried" photo from a
-# "low-severity dried" one.
+# Maps each of the 5 FIXED raw dataset folders to (category, condition,
+# health-score anchor, dried%/decayed% anchors). Disease folders are handled
+# separately by parse_disease_folder() below, since their category depends on
+# the folder name (severity-encoded), not a single fixed value.
 #
 # Score anchors are a documented HEURISTIC, not measured biological ground
 # truth (no expert-scored 0-10 dataset exists). Derived from the severity
@@ -68,26 +83,90 @@ class ClassTarget:
 #   - Moderate=6.0: guide explicitly says "still actively growing" -> kept in
 #     the upper-middle of the band rather than the bottom.
 #   - Low=3.0 (generic/no named symptom): "significant discoloration, reduced
-#     branching" with no described total-loss/rot/infection -> placed above
-#     the three named sub-conditions, which describe more advanced damage.
+#     branching" with no described total-loss/rot -> placed above Decay/Dried,
+#     which describe more advanced damage.
 #   - Decay=2.0: "tissue melting, brown patches, rot" -> active degradation,
 #     tissue still physically present.
-#   - Disease=1.5: "visible lesions, infection symptoms" -> ranked marginally
-#     below Decay for contagion risk, NOT because the guide ranks it
-#     explicitly. This Decay-vs-Disease ordering is the most arbitrary part
-#     of the scheme and the first candidate for revision once real
-#     expert-scored data exists.
 #   - Dried=0.5: guide explicitly says "no living tissue anywhere in frame"
 #     -> effectively total loss, anchored lowest, just above 0 (0 reserved
 #     for a hypothetical "no specimen at all" edge case).
+#
+# dried_pct/decayed_pct anchors are likewise a documented heuristic (no
+# pixel-level/segmentation ground truth exists): Dried is anchored high on
+# dried_pct (~95%) with a small decayed_pct overlap (drying and decay can
+# look visually similar at the edges); Decay is the mirror image; Low/Moderate
+# get small nonzero decayed_pct anchors reflecting "small tissue loss" /
+# "reduced branching" without full decay; Healthy is 0/0.
 CLASS_TARGET_MAP: dict[str, ClassTarget] = {
-    "Healthy": ClassTarget("Healthy", None, 9.0),
-    "Moderate": ClassTarget("Moderate", None, 6.0),
-    "Low": ClassTarget("Low", None, 3.0),
-    "Decay": ClassTarget("Low", "Decayed", 2.0),
-    "Disease": ClassTarget("Low", "Diseased", 1.5),
-    "Dried": ClassTarget("Low", "Dried", 0.5),
+    "Healthy": ClassTarget("Healthy", None, 9.0, dried_pct_anchor=0.0, decayed_pct_anchor=0.0),
+    "Moderate": ClassTarget("Moderate", None, 6.0, dried_pct_anchor=0.0, decayed_pct_anchor=5.0),
+    "Low": ClassTarget("Low", None, 3.0, dried_pct_anchor=0.0, decayed_pct_anchor=10.0),
+    "Decay": ClassTarget("Low", "Decayed", 2.0, dried_pct_anchor=5.0, decayed_pct_anchor=70.0),
+    "Dried": ClassTarget("Low", "Dried", 0.5, dried_pct_anchor=95.0, decayed_pct_anchor=5.0),
 }
+
+# Score anchor per disease severity — deliberately NOT as low as Decay/Dried:
+# a diseased specimen is still, by definition, only "diseased" (lesions /
+# infection), not melting or totally dried out. Moderate-severity disease sits
+# just below plain Moderate (6.0) to reflect the disease patch pulling the
+# score down a bit without crossing into Low; Low-severity disease sits close
+# to the old flat Disease anchor from the single-class scheme.
+_DISEASE_SEVERITY_SCORE_ANCHOR: dict[str, float] = {"Moderate": 5.0, "Low": 1.5}
+
+
+def parse_disease_folder(name: str) -> ClassTarget | None:
+    """Parses a raw dataset folder name of the form 'Disease_<Severity>' or
+    'Disease_<Severity>_<Subtype>' into a ClassTarget. Returns None if `name`
+    doesn't start with "Disease_" at all (i.e. isn't a disease folder).
+    Raises ValueError for a "Disease_..." folder that doesn't match the
+    expected severity/subtype vocabulary — a loud failure on a typo'd folder
+    name is much better than silently mis-training on it.
+
+    Examples: "Disease_Moderate", "Disease_Moderate_IceIce", "Disease_Low_Bacterial".
+    """
+    if not name.startswith("Disease_"):
+        return None
+
+    parts = name.split("_")
+    if len(parts) not in (2, 3):
+        raise ValueError(
+            f"Malformed disease folder name '{name}'. Expected 'Disease_<Severity>' "
+            f"or 'Disease_<Severity>_<Subtype>' (Severity in {DISEASE_SEVERITIES}, "
+            f"Subtype in {DISEASE_SUBTYPE_NAMES})."
+        )
+
+    severity = parts[1]
+    subtype = parts[2] if len(parts) == 3 else "Unknown"
+
+    if severity not in DISEASE_SEVERITIES:
+        raise ValueError(f"Unknown disease severity '{severity}' in folder '{name}'. Expected one of {DISEASE_SEVERITIES}.")
+    if subtype not in DISEASE_SUBTYPE_NAMES:
+        raise ValueError(f"Unknown disease subtype '{subtype}' in folder '{name}'. Expected one of {DISEASE_SUBTYPE_NAMES}.")
+
+    return ClassTarget(
+        category=severity,
+        condition="Diseased",
+        score_anchor=_DISEASE_SEVERITY_SCORE_ANCHOR[severity],
+        disease_subtype=subtype,
+        dried_pct_anchor=0.0,
+        decayed_pct_anchor=0.0,
+    )
+
+
+def resolve_class_target(raw_class_name: str) -> ClassTarget:
+    """Resolves any raw dataset folder name — one of the 5 fixed classes, or
+    a 'Disease_<Severity>[_<Subtype>]' folder — to its training target.
+    Raises ValueError for anything unrecognized (typo protection).
+    """
+    if raw_class_name in CLASS_TARGET_MAP:
+        return CLASS_TARGET_MAP[raw_class_name]
+    parsed = parse_disease_folder(raw_class_name)
+    if parsed is None:
+        raise ValueError(
+            f"Unrecognized raw dataset folder '{raw_class_name}'. Expected one of "
+            f"{list(CLASS_TARGET_MAP)} or a 'Disease_<Severity>[_<Subtype>]' folder."
+        )
+    return parsed
 
 
 @dataclass
@@ -103,19 +182,32 @@ class Config:
     logs_dir: Path = ML_ROOT / "logs"
     reports_dir: Path = ML_ROOT / "reports"
 
+    # The 5 FIXED raw class names. Disease_* folders are discovered on disk at
+    # load time (see src/data/dataset.py) rather than listed here, since any
+    # number of severity/subtype combinations may or may not exist yet.
     class_names: list[str] = field(default_factory=lambda: list(CLASS_NAMES))
     category_names: list[str] = field(default_factory=lambda: list(CATEGORY_NAMES))
     condition_names: list[str] = field(default_factory=lambda: list(CONDITION_NAMES))
+    disease_subtype_names: list[str] = field(default_factory=lambda: list(DISEASE_SUBTYPE_NAMES))
 
     score_min: float = SCORE_MIN
     score_max: float = SCORE_MAX
+    pct_min: float = PCT_MIN
+    pct_max: float = PCT_MAX
     # +/- uniform noise added to anchor targets on the train split only, so
-    # the score head can't trivially collapse to 6 constant outputs and is
-    # forced to read graded severity from pixels.
+    # the heads can't trivially collapse to a handful of constant outputs and
+    # are forced to read graded severity/extent from pixels.
     score_anchor_jitter: float = 0.5
+    pct_anchor_jitter: float = 5.0
 
     loss_weights: dict[str, float] = field(
-        default_factory=lambda: {"category": 1.0, "condition": 1.0, "score": 1.0}
+        default_factory=lambda: {
+            "category": 1.0,
+            "condition": 1.0,
+            "score": 1.0,
+            "disease_subtype": 1.0,
+            "extent": 1.0,
+        }
     )
 
     image_size: int = 224
@@ -140,16 +232,16 @@ class Config:
     device: str = "cuda"  # falls back to cpu automatically, see utils.device
 
     @property
-    def num_classes(self) -> int:
-        return len(self.class_names)
-
-    @property
     def num_categories(self) -> int:
         return len(self.category_names)
 
     @property
     def num_conditions(self) -> int:
         return len(self.condition_names)
+
+    @property
+    def num_disease_subtypes(self) -> int:
+        return len(self.disease_subtype_names)
 
 
 config = Config()

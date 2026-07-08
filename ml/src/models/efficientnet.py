@@ -1,10 +1,14 @@
 """EfficientNet-B0 transfer-learning model for seaweed health classification.
 
-Three heads share one backbone:
+Five heads share one backbone:
   - category_head: 3-way (Healthy/Moderate/Low)
   - condition_head: 4-way (None/Dried/Decayed/Diseased), only meaningful when
     category != Healthy (see the masked loss in src/train.py)
   - score_head: scalar health score in [0, 10], via sigmoid(x) * 10
+  - disease_subtype_head: N-way (config.disease_subtype_names), only
+    meaningful when condition == "Diseased" (masked loss, see src/train.py)
+  - extent_head: 2 scalars (dried_percentage, decayed_percentage) in [0, 100],
+    via sigmoid(x) * 100
 
 Recommended baseline per spec: EfficientNet-B0 (best accuracy/size tradeoff
 for a first model). Swap `build_multihead_model`'s backbone to try
@@ -25,6 +29,7 @@ class MultiHeadEfficientNet(nn.Module):
         self,
         num_categories: int,
         num_conditions: int,
+        num_disease_subtypes: int,
         freeze_backbone: bool = True,
         pretrained: bool = True,
     ) -> None:
@@ -48,31 +53,37 @@ class MultiHeadEfficientNet(nn.Module):
 
         def make_head(out_dim: int) -> nn.Sequential:
             # inplace=False: the pooled feature tensor below is shared by all
-            # three heads, so an in-place dropout in one head would corrupt
-            # the tensor the other heads' backward pass still needs.
+            # heads, so an in-place dropout in one head would corrupt the
+            # tensor the other heads' backward pass still needs.
             return nn.Sequential(nn.Dropout(p=0.3, inplace=False), nn.Linear(in_features, out_dim))
 
         self.category_head = make_head(num_categories)
         self.condition_head = make_head(num_conditions)
         self.score_head = make_head(1)
+        self.disease_subtype_head = make_head(num_disease_subtypes)
+        self.extent_head = make_head(2)  # [dried_pct, decayed_pct]
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         features = torch.flatten(self.avgpool(self.features(x)), 1)
         category_logits = self.category_head(features)
         condition_logits = self.condition_head(features)
         score = torch.sigmoid(self.score_head(features).squeeze(-1)) * 10.0
-        return category_logits, condition_logits, score
+        disease_subtype_logits = self.disease_subtype_head(features)
+        extent = torch.sigmoid(self.extent_head(features)) * 100.0  # [B, 2] = (dried_pct, decayed_pct)
+        return category_logits, condition_logits, score, disease_subtype_logits, extent
 
 
 def build_multihead_model(
     num_categories: int,
     num_conditions: int,
+    num_disease_subtypes: int,
     freeze_backbone: bool = True,
     pretrained: bool = True,
 ) -> MultiHeadEfficientNet:
     return MultiHeadEfficientNet(
         num_categories=num_categories,
         num_conditions=num_conditions,
+        num_disease_subtypes=num_disease_subtypes,
         freeze_backbone=freeze_backbone,
         pretrained=pretrained,
     )
@@ -93,6 +104,7 @@ def save_checkpoint(
     model: MultiHeadEfficientNet,
     category_names: list[str],
     condition_names: list[str],
+    disease_subtype_names: list[str],
     score_min: float,
     score_max: float,
     path,
@@ -102,6 +114,7 @@ def save_checkpoint(
         "model_state_dict": model.state_dict(),
         "category_names": category_names,
         "condition_names": condition_names,
+        "disease_subtype_names": disease_subtype_names,
         "score_min": score_min,
         "score_max": score_max,
         **(extra or {}),
@@ -109,13 +122,15 @@ def save_checkpoint(
     torch.save(payload, path)
 
 
-def load_checkpoint(path, device: torch.device) -> tuple[MultiHeadEfficientNet, list[str], list[str]]:
+def load_checkpoint(path, device: torch.device) -> tuple[MultiHeadEfficientNet, list[str], list[str], list[str]]:
     payload = torch.load(path, map_location=device)
     category_names = payload["category_names"]
     condition_names = payload["condition_names"]
+    disease_subtype_names = payload["disease_subtype_names"]
     model = build_multihead_model(
         num_categories=len(category_names),
         num_conditions=len(condition_names),
+        num_disease_subtypes=len(disease_subtype_names),
         freeze_backbone=False,
         pretrained=False,
     )
@@ -126,4 +141,4 @@ def load_checkpoint(path, device: torch.device) -> tuple[MultiHeadEfficientNet, 
     gc.collect()
     model.to(device)
     model.eval()
-    return model, category_names, condition_names
+    return model, category_names, condition_names, disease_subtype_names

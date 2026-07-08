@@ -26,9 +26,10 @@ from src.utils.seed import get_device  # noqa: E402
 
 
 class _CategoryHeadOnly(nn.Module):
-    """pytorch_grad_cam expects a model returning a single logits tensor;
-    the multi-head model returns (category, condition, score). This wraps it
-    to expose only the category head, which is the one the heatmap explains.
+    """pytorch_grad_cam expects a model returning a single logits tensor; the
+    multi-head model returns (category, condition, score, disease_subtype,
+    extent). This wraps it to expose only the category head, which is the
+    one the heatmap explains.
     """
 
     def __init__(self, model: MultiHeadEfficientNet) -> None:
@@ -36,7 +37,7 @@ class _CategoryHeadOnly(nn.Module):
         self.model = model
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        category_logits, _condition_logits, _score = self.model(x)
+        category_logits, *_rest = self.model(x)
         return category_logits
 
 
@@ -75,14 +76,16 @@ def main() -> None:
         sys.exit(1)
 
     device = get_device(config.device)
-    model, category_names, _condition_names = load_checkpoint(config.checkpoints_dir / "best_model.pt", device)
+    model, category_names, _condition_names, _disease_subtype_names = load_checkpoint(
+        config.checkpoints_dir / "best_model.pt", device
+    )
 
     image = Image.open(sys.argv[1])
     transform = build_transforms(config, train=False)
     input_tensor = transform(image.convert("RGB")).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        category_logits, _condition_logits, _score = model(input_tensor)
+        category_logits, *_rest = model(input_tensor)
         predicted_idx = int(category_logits.argmax(dim=1).item())
 
     print(f"Predicted category: {category_names[predicted_idx]}")

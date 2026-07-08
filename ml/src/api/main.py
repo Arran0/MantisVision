@@ -120,11 +120,19 @@ def health() -> HealthCheckResponse:
     model_loaded = checkpoint_path.exists()
     if model_loaded:
         predictor = get_predictor()
-        category_names, condition_names = predictor.category_names, predictor.condition_names
+        category_names, condition_names, disease_subtype_names = (
+            predictor.category_names, predictor.condition_names, predictor.disease_subtype_names
+        )
     else:
-        category_names, condition_names = config.category_names, config.condition_names
+        category_names, condition_names, disease_subtype_names = (
+            config.category_names, config.condition_names, config.disease_subtype_names
+        )
     return HealthCheckResponse(
-        status="ok", model_loaded=model_loaded, category_names=category_names, condition_names=condition_names
+        status="ok",
+        model_loaded=model_loaded,
+        category_names=category_names,
+        condition_names=condition_names,
+        disease_subtype_names=disease_subtype_names,
     )
 
 
@@ -141,7 +149,10 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
         species=result.species,
         category=result.category,
         condition=result.condition,
+        disease_subtype=result.disease_subtype,
         health_score=result.health_score,
+        dried_percentage=result.dried_percentage,
+        decayed_percentage=result.decayed_percentage,
         confidence=result.confidence,
         confidence_calibrated=result.confidence_calibrated,
         explanation_bullets=result.explanation_bullets,

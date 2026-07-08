@@ -22,7 +22,7 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import CLASS_TARGET_MAP, config  # noqa: E402
+from config import config  # noqa: E402
 from src.calibration import compute_ece, fit_temperature, plot_reliability_diagram  # noqa: E402
 from src.data.dataset import get_multihead_dataloaders  # noqa: E402
 from src.models.efficientnet import load_checkpoint  # noqa: E402
@@ -35,11 +35,11 @@ N_BINS = 15
 def _collect_category_logits(model, loader, device) -> tuple[torch.Tensor, torch.Tensor]:
     all_logits, all_labels = [], []
     with torch.no_grad():
-        for images, category_labels, _condition_labels, _score_targets in loader:
+        for images, targets in loader:
             images = images.to(device)
-            category_logits, _, _ = model(images)
+            category_logits, _, _, _, _ = model(images)
             all_logits.append(category_logits.cpu())
-            all_labels.append(category_labels)
+            all_labels.append(targets["category"])
     return torch.cat(all_logits), torch.cat(all_labels)
 
 
@@ -49,10 +49,10 @@ def calibrate(checkpoint_path: Path | None = None) -> dict:
     logger = get_logger("calibrate", config.logs_dir)
 
     checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
-    model, category_names, condition_names = load_checkpoint(checkpoint_path, device)
+    model, category_names, _condition_names, _disease_subtype_names = load_checkpoint(checkpoint_path, device)
     logger.info("Loaded checkpoint %s (categories=%s)", checkpoint_path, category_names)
 
-    data = get_multihead_dataloaders(config, CLASS_TARGET_MAP)
+    data = get_multihead_dataloaders(config)
     assert data.category_names == category_names, "Checkpoint category order does not match dataset."
 
     val_logits, val_labels = _collect_category_logits(model, data.val, device)

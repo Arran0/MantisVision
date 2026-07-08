@@ -1,7 +1,7 @@
 """Single entrypoint for turning an uploaded image into the full MVP output:
-species, category, condition, health score, confidence, explanation bullets,
-recommendation, and a Grad-CAM heatmap. Used by the FastAPI inference service
-(src/api/main.py).
+species, category, condition, disease subtype, health score, dried%/decayed%
+extent, confidence, explanation bullets, recommendation, and a Grad-CAM
+heatmap. Used by the FastAPI inference service (src/api/main.py).
 """
 from __future__ import annotations
 
@@ -35,7 +35,10 @@ class PredictionResult:
     species: str
     category: str
     condition: str | None
+    disease_subtype: str | None
     health_score: float
+    dried_percentage: float
+    decayed_percentage: float
     confidence: float
     confidence_calibrated: float | None
     explanation_bullets: list[str]
@@ -50,8 +53,11 @@ class Predictor:
         torch.set_num_threads(1)
         self.device = get_device(config.device)
         checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
-        self.model, self.category_names, self.condition_names = load_checkpoint(checkpoint_path, self.device)
+        self.model, self.category_names, self.condition_names, self.disease_subtype_names = load_checkpoint(
+            checkpoint_path, self.device
+        )
         self.healthy_idx = self.category_names.index("Healthy")
+        self.diseased_idx = self.condition_names.index("Diseased")
         self.transform = build_transforms(config, train=False)
 
         # Calibration is optional: predictions work fine without it, just with
@@ -69,7 +75,7 @@ class Predictor:
         input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
         with torch.inference_mode():
-            category_logits, condition_logits, score = self.model(input_tensor)
+            category_logits, condition_logits, score, disease_subtype_logits, extent = self.model(input_tensor)
             category_probs = F.softmax(category_logits, dim=1).squeeze(0)
             category_idx = int(category_probs.argmax().item())
             confidence = float(category_probs[category_idx].item())
@@ -85,12 +91,24 @@ class Predictor:
             # loss, see src/train.py), so its output there is undefined —
             # force it to None rather than trust an unsupervised guess.
             condition = None
+            condition_idx = None
             if category != self.category_names[self.healthy_idx]:
                 condition_idx = int(F.softmax(condition_logits, dim=1).squeeze(0).argmax().item())
                 condition_name = self.condition_names[condition_idx]
                 condition = condition_name if condition_name != "None" else None
 
+            # Same masking logic one level deeper: the disease-subtype head is
+            # only trained on condition=="Diseased" samples, so its output is
+            # undefined for anything else — force it to None rather than
+            # trust an unsupervised guess.
+            disease_subtype = None
+            if condition_idx is not None and condition_idx == self.diseased_idx:
+                subtype_idx = int(F.softmax(disease_subtype_logits, dim=1).squeeze(0).argmax().item())
+                disease_subtype = self.disease_subtype_names[subtype_idx]
+
             health_score = float(score.squeeze(0).item())
+            dried_percentage = float(extent.squeeze(0)[0].item())
+            decayed_percentage = float(extent.squeeze(0)[1].item())
 
         gradcam_b64 = ""
         if ENABLE_GRADCAM:
@@ -108,10 +126,13 @@ class Predictor:
             species=SPECIES_DISPLAY_NAME,
             category=category,
             condition=condition,
+            disease_subtype=disease_subtype,
             health_score=health_score,
+            dried_percentage=dried_percentage,
+            decayed_percentage=decayed_percentage,
             confidence=confidence,
             confidence_calibrated=confidence_calibrated,
-            explanation_bullets=explanation_bullets_for(category, condition),
-            recommendation=recommendation_for(category, condition),
+            explanation_bullets=explanation_bullets_for(category, condition, disease_subtype, dried_percentage, decayed_percentage),
+            recommendation=recommendation_for(category, condition, disease_subtype),
             gradcam_base64_png=gradcam_b64,
         )
