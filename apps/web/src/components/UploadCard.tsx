@@ -23,6 +23,11 @@ export function UploadCard() {
   const selectionRef = useRef<Selection | null>(null);
   selectionRef.current = selection;
 
+  // Bumped on every analyze()/reset() so a request that's still in flight when
+  // the user resets or starts a new one can't clobber state with a stale result.
+  const requestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
   // Turn the camera off and revoke any object URL if the user navigates away.
   useEffect(() => {
     return () => {
@@ -40,6 +45,9 @@ export function UploadCard() {
   }
 
   function reset() {
+    requestIdRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (selection) URL.revokeObjectURL(selection.url);
     setSelection(null);
     setResult(null);
@@ -91,11 +99,14 @@ export function UploadCard() {
 
   async function analyze() {
     if (!selection) return;
+
+    const id = ++requestIdRef.current;
     setResult(null);
     setError(null);
     setLoading(true);
 
     const controller = new AbortController();
+    abortRef.current = controller;
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
@@ -109,6 +120,7 @@ export function UploadCard() {
       });
 
       const payload = await response.json().catch(() => null);
+      if (requestIdRef.current !== id) return; // superseded by a reset/new request
 
       if (!response.ok) {
         throw new Error(
@@ -119,6 +131,7 @@ export function UploadCard() {
 
       setResult(payload as PredictionResult);
     } catch (err) {
+      if (requestIdRef.current !== id) return; // superseded — ignore stale error too
       if (err instanceof DOMException && err.name === "AbortError") {
         setError(
           "The inference service didn't respond in time. Confirm ML_API_URL points to a reachable, running service."
@@ -128,7 +141,7 @@ export function UploadCard() {
       }
     } finally {
       clearTimeout(timer);
-      setLoading(false);
+      if (requestIdRef.current === id) setLoading(false);
     }
   }
 
@@ -142,7 +155,7 @@ export function UploadCard() {
   // ---- Camera view -------------------------------------------------------
   if (cameraActive) {
     return (
-      <div className="w-full">
+      <div className="mv-fade-in mx-auto w-full max-w-3xl">
         <div className="mv-card overflow-hidden p-3">
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-2xl bg-black" />
@@ -159,54 +172,88 @@ export function UploadCard() {
     );
   }
 
-  // ---- Review + analyse --------------------------------------------------
+  // ---- Review + analyse / results ----------------------------------------
   if (selection) {
-    return (
-      <div className="flex w-full flex-col gap-5">
+    const photo = (
+      <div className="relative">
         <div className="mv-card overflow-hidden">
           <img
             src={selection.url}
             alt="Selected specimen"
-            className="max-h-96 w-full bg-slate-100 object-contain"
+            className="max-h-[28rem] w-full bg-slate-100 object-contain"
           />
         </div>
+        <button
+          type="button"
+          onClick={reset}
+          aria-label="Start over with a new photo"
+          title="Start over"
+          className="mv-icon-btn absolute right-3 top-3"
+        >
+          <CloseIcon />
+        </button>
+      </div>
+    );
 
+    const actions = !loading && !result && (
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <button type="button" onClick={analyze} className="mv-btn-primary flex-1">
+          {error ? "Try again" : "Analyse"}
+        </button>
+        <button type="button" onClick={reset} className="mv-btn-secondary sm:w-auto">
+          Choose another
+        </button>
+      </div>
+    );
+
+    const status = (
+      <>
         {error && (
           <div className="rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-center text-sm text-red-700 backdrop-blur">
             {error}
           </div>
         )}
-
-        {loading ? (
+        {loading && (
           <div className="mv-card flex items-center justify-center gap-3 px-6 py-5 text-slate-600">
             <Spinner />
             <span className="font-medium">Analysing specimen…</span>
           </div>
-        ) : result ? (
-          <button type="button" onClick={reset} className="mv-btn-secondary w-full">
-            Scan another photo
-          </button>
-        ) : (
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <button type="button" onClick={analyze} className="mv-btn-primary flex-1">
-              {error ? "Try again" : "Analyse"}
-            </button>
-            <button type="button" onClick={reset} className="mv-btn-secondary sm:w-auto">
-              Choose another
+        )}
+      </>
+    );
+
+    if (result) {
+      return (
+        <div className="mv-fade-in grid w-full gap-6 lg:grid-cols-5 lg:items-start">
+          <div className="flex flex-col gap-5 lg:sticky lg:top-6 lg:col-span-2">
+            {photo}
+            {status}
+            <button type="button" onClick={reset} className="mv-btn-primary w-full">
+              <PlusIcon />
+              Scan another specimen
             </button>
           </div>
-        )}
+          <div className="lg:col-span-3">
+            <ResultCard result={result} />
+          </div>
+        </div>
+      );
+    }
 
-        {result && <ResultCard result={result} />}
+    return (
+      <div className="mv-fade-in mx-auto flex w-full max-w-3xl flex-col gap-5">
+        {photo}
+        {status}
+        {actions}
       </div>
     );
   }
 
   // ---- Empty state (pick a photo) ---------------------------------------
   return (
-    <div className="w-full">
-      <div className="mv-card flex flex-col items-center gap-5 px-6 py-10 text-center">
-        <span className="text-xl font-semibold tracking-tight text-slate-800">
+    <div className="mv-fade-in mx-auto w-full max-w-3xl">
+      <div className="mv-card flex flex-col items-center gap-5 px-6 py-14 text-center sm:py-16">
+        <span className="text-xl font-semibold tracking-tight text-slate-800 sm:text-2xl">
           Identify a seaweed specimen
         </span>
         <span className="max-w-xs text-sm text-slate-500">
@@ -244,6 +291,22 @@ function Spinner() {
         fill="currentColor"
         d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z"
       />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

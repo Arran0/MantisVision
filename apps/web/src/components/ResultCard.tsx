@@ -13,7 +13,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (
     <div>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-1 text-slate-800">{children}</p>
+      <p className="mt-1 leading-relaxed text-slate-800">{children}</p>
     </div>
   );
 }
@@ -23,13 +23,13 @@ export function ResultCard({ result }: { result: PredictionResult }) {
   const confidence = Math.round(result.confidence * 100);
 
   return (
-    <div className="mv-card flex flex-col gap-5 p-6">
+    <div className="mv-card flex flex-col gap-6 p-6 sm:p-8">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Species</p>
-          <p className="mt-1 text-xl font-semibold italic text-slate-900">{result.species}</p>
+          <p className="mt-1 text-2xl font-semibold italic text-slate-900">{result.species}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-sm font-semibold ${badgeClass}`}>
+        <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${badgeClass}`}>
           {result.health}
         </span>
       </div>
@@ -41,7 +41,7 @@ export function ResultCard({ result }: { result: PredictionResult }) {
         </div>
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
           <div
-            className="h-full rounded-full"
+            className="h-full rounded-full transition-[width] duration-500"
             style={{
               width: `${confidence}%`,
               backgroundImage: "linear-gradient(90deg, #ff7a1a, #1a7ae0, #16a34a)",
@@ -50,8 +50,10 @@ export function ResultCard({ result }: { result: PredictionResult }) {
         </div>
       </div>
 
-      <Field label="Explanation">{result.explanation}</Field>
-      <Field label="Recommendation">{result.recommendation}</Field>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <Field label="Explanation">{result.explanation}</Field>
+        <Field label="Recommendation">{result.recommendation}</Field>
+      </div>
 
       {result.gradcamPngBase64 && (
         <div>
