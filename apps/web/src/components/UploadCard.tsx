@@ -4,8 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import type { PredictionResult } from "@/lib/types";
 import { ResultCard } from "@/components/ResultCard";
 
+// Give up on a stuck inference request instead of showing "Analysing…" forever.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+type Selection = { blob: Blob; filename: string; url: string };
+
 export function UploadCard() {
-  const [preview, setPreview] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [result, setResult] = useState<PredictionResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -13,13 +18,32 @@ export function UploadCard() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const selectionRef = useRef<Selection | null>(null);
+  selectionRef.current = selection;
 
-  // Make sure the camera light turns off if the user navigates away mid-stream.
+  // Turn the camera off and revoke any object URL if the user navigates away.
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      if (selectionRef.current) URL.revokeObjectURL(selectionRef.current.url);
     };
   }, []);
+
+  function chooseImage(blob: Blob, filename: string) {
+    // Stage the image for review — analysis only starts when the user taps Analyse.
+    if (selection) URL.revokeObjectURL(selection.url);
+    setSelection({ blob, filename, url: URL.createObjectURL(blob) });
+    setResult(null);
+    setError(null);
+  }
+
+  function reset() {
+    if (selection) URL.revokeObjectURL(selection.url);
+    setSelection(null);
+    setResult(null);
+    setError(null);
+    setLoading(false);
+  }
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -60,30 +84,48 @@ export function UploadCard() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     stopCamera();
-    canvas.toBlob((blob) => blob && submitImage(blob, "capture.jpg"), "image/jpeg", 0.92);
+    canvas.toBlob((blob) => blob && chooseImage(blob, "capture.jpg"), "image/jpeg", 0.92);
   }
 
-  async function submitImage(file: Blob, filename: string) {
-    setPreview(URL.createObjectURL(file));
+  async function analyze() {
+    if (!selection) return;
     setResult(null);
     setError(null);
     setLoading(true);
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
     try {
       const formData = new FormData();
-      formData.append("file", file, filename);
+      formData.append("file", selection.blob, selection.filename);
 
-      const response = await fetch("/api/predict", { method: "POST", body: formData });
-      const payload = await response.json();
+      const response = await fetch("/api/predict", {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+
+      const payload = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(payload.error ?? payload.detail ?? "Prediction failed.");
+        throw new Error(
+          payload?.error ?? payload?.detail ?? `Prediction failed (HTTP ${response.status}).`
+        );
       }
+      if (!payload) throw new Error("The inference service returned an unexpected response.");
 
       setResult(payload as PredictionResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError(
+          "The inference service didn't respond in time. Confirm ML_API_URL points to a reachable, running service."
+        );
+      } else {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      }
     } finally {
+      clearTimeout(timer);
       setLoading(false);
     }
   }
@@ -91,68 +133,115 @@ export function UploadCard() {
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    submitImage(file, file.name);
+    chooseImage(file, file.name);
+    event.target.value = ""; // allow re-selecting the same file
   }
 
-  return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
-      {cameraActive ? (
-        <div className="flex flex-col gap-3 rounded-2xl border-2 border-seaweed-500 bg-black p-3">
+  // ---- Camera view -------------------------------------------------------
+  if (cameraActive) {
+    return (
+      <div className="w-full">
+        <div className="mv-card overflow-hidden p-3">
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-xl" />
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={capturePhoto}
-              className="flex-1 rounded-xl bg-seaweed-500 py-3 font-medium text-white transition hover:bg-seaweed-600"
-            >
+          <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-2xl bg-black" />
+          <div className="mt-3 flex gap-3">
+            <button type="button" onClick={capturePhoto} className="mv-btn-primary flex-1">
               Capture
             </button>
-            <button
-              type="button"
-              onClick={stopCamera}
-              className="rounded-xl border border-white/40 px-4 py-3 font-medium text-white transition hover:bg-white/10"
-            >
+            <button type="button" onClick={stopCamera} className="mv-btn-secondary">
               Cancel
             </button>
           </div>
         </div>
-      ) : (
-        <div className="flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed border-seaweed-500 bg-white p-8 text-center transition hover:bg-seaweed-50">
-          <span className="text-lg font-medium text-seaweed-900">
-            Photograph a Kappaphycus alvarezii specimen
-          </span>
-          <span className="text-sm text-slate-500">Open the camera, or upload an existing photo</span>
+      </div>
+    );
+  }
 
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
-            <button
-              type="button"
-              onClick={openCamera}
-              className="rounded-xl bg-seaweed-500 px-5 py-3 font-medium text-white transition hover:bg-seaweed-600"
-            >
-              Open camera
-            </button>
-            <label className="cursor-pointer rounded-xl border border-seaweed-500 px-5 py-3 font-medium text-seaweed-900 transition hover:bg-seaweed-50">
-              Upload photo
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-            </label>
-          </div>
+  // ---- Review + analyse --------------------------------------------------
+  if (selection) {
+    return (
+      <div className="flex w-full flex-col gap-5">
+        <div className="mv-card overflow-hidden">
+          <img
+            src={selection.url}
+            alt="Selected specimen"
+            className="max-h-96 w-full bg-slate-100 object-contain"
+          />
         </div>
-      )}
 
-      {preview && !cameraActive && (
-        <img src={preview} alt="Captured specimen" className="max-h-80 w-full rounded-xl object-contain" />
-      )}
+        {error && (
+          <div className="rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-center text-sm text-red-700 backdrop-blur">
+            {error}
+          </div>
+        )}
 
-      {loading && <p className="text-center text-slate-500">Analyzing...</p>}
-      {error && <p className="text-center text-red-600">{error}</p>}
-      {result && <ResultCard result={result} />}
+        {loading ? (
+          <div className="mv-card flex items-center justify-center gap-3 px-6 py-5 text-slate-600">
+            <Spinner />
+            <span className="font-medium">Analysing specimen…</span>
+          </div>
+        ) : result ? (
+          <button type="button" onClick={reset} className="mv-btn-secondary w-full">
+            Scan another photo
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button type="button" onClick={analyze} className="mv-btn-primary flex-1">
+              {error ? "Try again" : "Analyse"}
+            </button>
+            <button type="button" onClick={reset} className="mv-btn-secondary sm:w-auto">
+              Choose another
+            </button>
+          </div>
+        )}
+
+        {result && <ResultCard result={result} />}
+      </div>
+    );
+  }
+
+  // ---- Empty state (pick a photo) ---------------------------------------
+  return (
+    <div className="w-full">
+      <div className="mv-card flex flex-col items-center gap-5 px-6 py-10 text-center">
+        <span className="text-xl font-semibold tracking-tight text-slate-800">
+          Identify a seaweed specimen
+        </span>
+        <span className="max-w-xs text-sm text-slate-500">
+          Take a photo or upload one, then tap Analyse to get species and health results.
+        </span>
+
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:justify-center">
+          <button type="button" onClick={openCamera} className="mv-btn-primary">
+            Open camera
+          </button>
+          <label className="mv-btn-secondary cursor-pointer">
+            Upload photo
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </label>
+        </div>
+      </div>
+
+      {error && <p className="mt-4 text-center text-sm text-red-600">{error}</p>}
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="h-5 w-5 animate-spin text-ocean-500" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path
+        className="opacity-90"
+        fill="currentColor"
+        d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z"
+      />
+    </svg>
   );
 }
