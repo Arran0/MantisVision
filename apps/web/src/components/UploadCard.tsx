@@ -5,7 +5,9 @@ import type { PredictionResult } from "@/lib/types";
 import { ResultCard } from "@/components/ResultCard";
 
 // Give up on a stuck inference request instead of showing "Analysing…" forever.
-const REQUEST_TIMEOUT_MS = 30_000;
+// Kept above the API route's own timeout so a slow first response (e.g. a
+// cold-starting inference host) is waited out rather than cut off here.
+const REQUEST_TIMEOUT_MS = 62_000;
 
 type Selection = { blob: Blob; filename: string; url: string };
 
