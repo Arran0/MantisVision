@@ -4,10 +4,10 @@
   "description": "Google Lens for Seaweed — species ID, health assessment, and disease detection.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f0fdf6",
-  "theme_color": "#15803d",
+  "background_color": "#f5f6f8",
+  "theme_color": "#1a7ae0",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }

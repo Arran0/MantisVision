@@ -6,16 +6,24 @@ export const metadata: Metadata = {
   title: "Mantis Vision",
   description: "Google Lens for Seaweed — photograph a specimen, get a health assessment.",
   manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Mantis Vision",
+  },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#15803d",
+  themeColor: "#1a7ae0",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-seaweed-50 text-slate-900 antialiased">
+      <body className="min-h-screen font-sans text-slate-900 antialiased">
         <ServiceWorkerRegister />
         {children}
       </body>

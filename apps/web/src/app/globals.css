@@ -1,3 +1,43 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  /* Soft, Apple-style backdrop tinted with the mantis palette. */
+  background-color: #f5f6f8;
+  background-image:
+    radial-gradient(60rem 40rem at 8% -10%, rgba(255, 122, 26, 0.10), transparent 60%),
+    radial-gradient(55rem 40rem at 100% 0%, rgba(26, 122, 224, 0.12), transparent 55%),
+    radial-gradient(60rem 45rem at 50% 120%, rgba(22, 163, 74, 0.10), transparent 60%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .mv-card {
+    @apply rounded-3xl border border-black/5 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur-xl;
+  }
+
+  .mv-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-ocean-500/25 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60;
+    background-image: linear-gradient(120deg, #ff7a1a 0%, #1a7ae0 55%, #16a34a 100%);
+  }
+
+  .mv-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-black/10 bg-white/70 px-6 py-3.5 text-base font-semibold text-slate-700 backdrop-blur transition hover:bg-white active:scale-[0.98];
+  }
+
+  .mv-text-gradient {
+    background-image: linear-gradient(110deg, #ff7a1a 0%, #1a7ae0 52%, #16a34a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
