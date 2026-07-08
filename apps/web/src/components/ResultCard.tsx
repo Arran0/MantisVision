@@ -23,7 +23,7 @@ export function ResultCard({ result }: { result: PredictionResult }) {
   const confidence = Math.round(result.confidence * 100);
 
   return (
-    <div className="mv-card flex flex-col gap-6 p-6 sm:p-8">
+    <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Species</p>

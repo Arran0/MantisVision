@@ -17,6 +17,9 @@ export function UploadCard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  // Drives the two-card slide: collapsed (explainer hidden behind collector)
+  // until Analyse is tapped, then the cards separate.
+  const [revealed, setRevealed] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -42,6 +45,7 @@ export function UploadCard() {
     setSelection({ blob, filename, url: URL.createObjectURL(blob) });
     setResult(null);
     setError(null);
+    setRevealed(false);
   }
 
   function reset() {
@@ -53,6 +57,7 @@ export function UploadCard() {
     setResult(null);
     setError(null);
     setLoading(false);
+    setRevealed(false);
   }
 
   function stopCamera() {
@@ -82,6 +87,12 @@ export function UploadCard() {
     }
   }, [cameraActive]);
 
+  // Swirl the background blobs while a scan is in flight; they ease back on stop.
+  useEffect(() => {
+    document.body.classList.toggle("mv-analyzing", loading);
+    return () => document.body.classList.remove("mv-analyzing");
+  }, [loading]);
+
   function capturePhoto() {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return;
@@ -104,6 +115,7 @@ export function UploadCard() {
     setResult(null);
     setError(null);
     setLoading(true);
+    setRevealed(true); // slide the explainer card into view
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -152,146 +164,122 @@ export function UploadCard() {
     event.target.value = ""; // allow re-selecting the same file
   }
 
-  // ---- Camera view -------------------------------------------------------
-  if (cameraActive) {
-    return (
-      <div className="mv-fade-in mx-auto w-full max-w-3xl">
-        <div className="mv-card overflow-hidden p-3">
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-2xl bg-black" />
-          <div className="mt-3 flex gap-3">
-            <button type="button" onClick={capturePhoto} className="mv-btn-primary flex-1">
-              Capture
-            </button>
-            <button type="button" onClick={stopCamera} className="mv-btn-secondary">
-              Cancel
-            </button>
+  return (
+    <div className="mv-stage" data-revealed={revealed}>
+      {/* ---- Collector card -------------------------------------------- */}
+      <div className="mv-slot mv-slot-collector">
+        <section className="mv-card h-full w-full">
+        <div className="flex h-full flex-col gap-4 p-5 sm:p-6">
+          <p className="text-center text-sm font-semibold text-slate-500">
+            Let&rsquo;s analyse a seaweed!
+          </p>
+
+          {/* Image holder — placeholder, staged photo, or live camera.
+              Background matches the card so the placeholder blends in. */}
+          <div className="relative flex-1 min-h-0 overflow-hidden rounded-[1.5rem] border border-white/60 bg-white/60">
+            {cameraActive ? (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="h-full w-full bg-black object-cover"
+              />
+            ) : selection ? (
+              <>
+                <img
+                  src={selection.url}
+                  alt="Selected specimen"
+                  className="h-full w-full object-contain"
+                />
+                <button
+                  type="button"
+                  onClick={reset}
+                  aria-label="Start over with a new photo"
+                  title="Start over"
+                  className="mv-icon-btn absolute right-3 top-3"
+                >
+                  <CloseIcon />
+                </button>
+              </>
+            ) : (
+              <img
+                src="/seaweed-placeholder.svg"
+                alt=""
+                aria-hidden
+                className="h-full w-full object-contain p-6 opacity-90"
+              />
+            )}
           </div>
+
+          {/* Actions */}
+          {cameraActive ? (
+            <div className="flex gap-3">
+              <button type="button" onClick={capturePhoto} className="mv-btn-blue flex-1">
+                Capture
+              </button>
+              <button type="button" onClick={stopCamera} className="mv-btn-orange">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-3">
+                <label className="mv-btn-orange flex-1 cursor-pointer">
+                  Upload photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </label>
+                <button type="button" onClick={openCamera} className="mv-btn-blue flex-1">
+                  Open camera
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={analyze}
+                disabled={!selection || loading}
+                className="mv-btn-blue w-full"
+              >
+                {loading ? "Analysing…" : error ? "Try again" : "Analyse"}
+              </button>
+            </div>
+          )}
         </div>
+        </section>
       </div>
-    );
-  }
 
-  // ---- Review + analyse / results ----------------------------------------
-  if (selection) {
-    const photo = (
-      <div className="relative">
-        <div className="mv-card overflow-hidden">
-          <img
-            src={selection.url}
-            alt="Selected specimen"
-            className="max-h-[28rem] w-full bg-slate-100 object-contain"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={reset}
-          aria-label="Start over with a new photo"
-          title="Start over"
-          className="mv-icon-btn absolute right-3 top-3"
-        >
-          <CloseIcon />
-        </button>
-      </div>
-    );
-
-    const actions = !loading && !result && (
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <button type="button" onClick={analyze} className="mv-btn-primary flex-1">
-          {error ? "Try again" : "Analyse"}
-        </button>
-        <button type="button" onClick={reset} className="mv-btn-secondary sm:w-auto">
-          Choose another
-        </button>
-      </div>
-    );
-
-    const status = (
-      <>
-        {error && (
-          <div className="rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-center text-sm text-red-700 backdrop-blur">
-            {error}
-          </div>
-        )}
-        {loading && (
-          <div className="mv-card flex items-center justify-center gap-3 px-6 py-5 text-slate-600">
-            <Spinner />
-            <span className="font-medium">Analysing specimen…</span>
-          </div>
-        )}
-      </>
-    );
-
-    if (result) {
-      return (
-        <div className="mv-fade-in grid w-full gap-6 lg:grid-cols-5 lg:items-start">
-          <div className="flex flex-col gap-5 lg:sticky lg:top-6 lg:col-span-2">
-            {photo}
-            {status}
-            <button type="button" onClick={reset} className="mv-btn-primary w-full">
-              <PlusIcon />
-              Scan another specimen
-            </button>
-          </div>
-          <div className="lg:col-span-3">
+      {/* ---- Explainer card -------------------------------------------- */}
+      <div className="mv-slot mv-slot-explainer" aria-hidden={!revealed}>
+        <section className="mv-card h-full w-full">
+        <div className="h-full overflow-y-auto p-5 sm:p-6">
+          {error ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+              <span className="text-lg font-semibold text-coral-600">Analysis failed</span>
+              <p className="max-w-xs text-sm text-slate-600">{error}</p>
+            </div>
+          ) : loading ? (
+            <div className="flex h-full flex-col items-center justify-center gap-4 text-slate-600">
+              <div className="mv-dots" aria-hidden>
+                <span />
+                <span />
+                <span />
+              </div>
+              <span className="font-medium">Analysing specimen…</span>
+            </div>
+          ) : result ? (
             <ResultCard result={result} />
-          </div>
+          ) : null}
         </div>
-      );
-    }
-
-    return (
-      <div className="mv-fade-in mx-auto flex w-full max-w-3xl flex-col gap-5">
-        {photo}
-        {status}
-        {actions}
+        </section>
       </div>
-    );
-  }
-
-  // ---- Empty state (pick a photo) ---------------------------------------
-  return (
-    <div className="mv-fade-in mx-auto w-full max-w-3xl">
-      <div className="mv-card flex flex-col items-center gap-5 px-6 py-14 text-center sm:py-16">
-        <span className="text-xl font-semibold tracking-tight text-slate-800 sm:text-2xl">
-          Identify a seaweed specimen
-        </span>
-        <span className="max-w-xs text-sm text-slate-500">
-          Take a photo or upload one, then tap Analyse to get species and health results.
-        </span>
-
-        <div className="flex w-full flex-col gap-3 sm:flex-row sm:justify-center">
-          <button type="button" onClick={openCamera} className="mv-btn-primary">
-            Open camera
-          </button>
-          <label className="mv-btn-secondary cursor-pointer">
-            Upload photo
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-          </label>
-        </div>
-      </div>
-
-      {error && <p className="mt-4 text-center text-sm text-red-600">{error}</p>}
     </div>
-  );
-}
-
-function Spinner() {
-  return (
-    <svg className="h-5 w-5 animate-spin text-ocean-500" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path
-        className="opacity-90"
-        fill="currentColor"
-        d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z"
-      />
-    </svg>
   );
 }
 
@@ -303,10 +291,3 @@ function CloseIcon() {
   );
 }
 
-function PlusIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden>
-      <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}

@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" fill="none" role="img" aria-label="Cartoon seaweed">
+  <defs>
+    <linearGradient id="sw-main" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cf7699"/>
+      <stop offset="1" stop-color="#9e4c72"/>
+    </linearGradient>
+    <linearGradient id="sw-side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c76d90"/>
+      <stop offset="1" stop-color="#95466b"/>
+    </linearGradient>
+    <radialGradient id="sw-bub" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#cfe6ef"/>
+      <stop offset="1" stop-color="#a9cedd"/>
+    </radialGradient>
+  </defs>
+
+  <g stroke="#6f2b4d" stroke-width="11" stroke-linejoin="round" stroke-linecap="round">
+    <!-- outer left frond -->
+    <path fill="url(#sw-side)" d="M452 860
+      C 360 760 300 690 285 560
+      C 275 470 300 430 330 470
+      C 352 500 330 560 362 650
+      C 388 726 452 800 470 850 Z"/>
+    <!-- outer right frond -->
+    <path fill="url(#sw-side)" d="M548 860
+      C 648 762 712 690 726 552
+      C 735 462 706 424 678 464
+      C 656 496 682 560 648 652
+      C 620 728 548 800 530 850 Z"/>
+
+    <!-- left main frond -->
+    <path fill="url(#sw-side)" d="M470 862
+      C 402 720 388 600 392 520
+      C 360 506 360 470 392 458
+      C 380 402 404 372 434 380
+      C 466 388 452 452 442 520
+      C 470 604 492 720 512 862 Z"/>
+    <!-- right main frond -->
+    <path fill="url(#sw-side)" d="M530 862
+      C 598 720 612 600 608 520
+      C 640 506 640 470 608 458
+      C 620 402 596 372 566 380
+      C 534 388 548 452 558 520
+      C 530 604 508 720 488 862 Z"/>
+
+    <!-- centre frond (tallest, bulbous top) -->
+    <path fill="url(#sw-main)" d="M468 872
+      C 452 760 470 700 476 640
+      C 448 622 452 588 480 578
+      C 462 540 470 505 494 500
+      C 494 452 500 300 502 262
+      C 504 214 556 214 560 262
+      C 564 322 556 452 552 500
+      C 578 512 584 548 556 566
+      C 582 586 578 622 550 642
+      C 556 704 566 780 548 872 Z"/>
+
+    <!-- sandy mound -->
+    <path fill="#cf9a5c" d="M360 900 C 440 862 560 862 640 900 C 628 936 588 946 500 946 C 412 946 372 936 360 900 Z"/>
+  </g>
+
+  <!-- centre vein -->
+  <path d="M524 840 C 502 640 508 420 520 300" stroke="#7d365a" stroke-width="7" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- spots -->
+  <g fill="#6f2b4d" opacity="0.5">
+    <circle cx="512" cy="330" r="9"/>
+    <circle cx="486" cy="430" r="7"/>
+    <circle cx="548" cy="470" r="7"/>
+    <circle cx="410" cy="470" r="8"/>
+    <circle cx="360" cy="560" r="7"/>
+    <circle cx="600" cy="520" r="7"/>
+    <circle cx="672" cy="560" r="7"/>
+  </g>
+  <!-- sand speckles -->
+  <g fill="#9a6b34" opacity="0.7">
+    <circle cx="470" cy="912" r="6"/>
+    <circle cx="512" cy="922" r="5"/>
+    <circle cx="556" cy="910" r="6"/>
+  </g>
+
+  <!-- bubbles -->
+  <g stroke="#8fb6c8" stroke-width="4">
+    <circle cx="640" cy="300" r="30" fill="url(#sw-bub)"/>
+    <circle cx="240" cy="300" r="24" fill="url(#sw-bub)"/>
+    <circle cx="740" cy="430" r="20" fill="url(#sw-bub)"/>
+    <circle cx="205" cy="430" r="18" fill="url(#sw-bub)"/>
+    <circle cx="585" cy="205" r="16" fill="url(#sw-bub)"/>
+    <circle cx="690" cy="330" r="10" fill="url(#sw-bub)"/>
+    <circle cx="300" cy="330" r="12" fill="url(#sw-bub)"/>
+  </g>
+</svg>
