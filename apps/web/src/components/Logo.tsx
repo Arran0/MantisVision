@@ -1,24 +1,27 @@
-// The Mantis Vision mark: an eye on a squircle carrying the mantis-shrimp
-// gradient (orange → ocean blue → seaweed green). Scales crisply at any size.
+// The Mantis Vision mark: an orange eye (vesica) whose iris is the three
+// brand dots — orange, ocean blue, seaweed green. Scales crisply at any size.
 export function Logo({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 64 64" className={className} role="img" aria-label="Mantis Vision">
-      <defs>
-        <linearGradient id="mv-bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#ff7a1a" />
-          <stop offset="0.5" stopColor="#1a7ae0" />
-          <stop offset="1" stopColor="#16a34a" />
-        </linearGradient>
-        <radialGradient id="mv-iris" cx="0.5" cy="0.45" r="0.55">
-          <stop offset="0" stopColor="#16a34a" />
-          <stop offset="1" stopColor="#1a7ae0" />
-        </radialGradient>
-      </defs>
-      <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#mv-bg)" />
-      <ellipse cx="32" cy="32" rx="22.4" ry="13.8" fill="#ffffff" />
-      <circle cx="32" cy="32" r="10.6" fill="url(#mv-iris)" stroke="#ff7a1a" strokeWidth="1.2" />
-      <circle cx="32" cy="32" r="4.7" fill="#071a3d" />
-      <circle cx="29.5" cy="29.5" r="1.9" fill="#ffffff" fillOpacity="0.92" />
+    <svg viewBox="0 0 400 400" className={className} role="img" aria-label="Mantis Vision">
+      {/* Orange eye outline with a white interior punched out via even-odd fill. */}
+      <path
+        fill="#e67e30"
+        fillRule="evenodd"
+        d="M200 110
+           C120 110 66 165 40 200
+           C66 235 120 290 200 290
+           C280 290 334 235 360 200
+           C334 165 280 110 200 110 Z
+           M200 138
+           C234 138 262 166 262 200
+           C262 234 234 262 200 262
+           C166 262 138 234 138 200
+           C138 166 166 138 200 138 Z"
+      />
+      {/* Three brand dots forming the iris. */}
+      <circle cx="200" cy="180" r="18" fill="#e67e30" />
+      <circle cx="181" cy="212" r="18" fill="#1f6fc4" />
+      <circle cx="219" cy="212" r="18" fill="#1f9e5a" />
     </svg>
   );
 }

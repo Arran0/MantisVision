@@ -43,25 +43,136 @@ body {
     background: radial-gradient(120% 90% at 50% 0%, transparent 40%, rgba(15, 23, 42, 0.06) 100%);
   }
 
+  /* Blob group spins around the viewport centre while analysing, then eases
+     back to rest (transform → none) when body.mv-analyzing is removed. */
+  .mv-blobs {
+    transform-origin: center;
+    transition: transform 1.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  body.mv-analyzing .mv-blobs {
+    animation: mv-swirl 4.5s linear infinite;
+  }
+
+  /* Three brand dots chasing each other — used while a scan is running. */
+  .mv-dots {
+    @apply flex items-center gap-2;
+  }
+  .mv-dots span {
+    @apply block h-3 w-3 rounded-full;
+    animation: mv-dot-chase 1.05s ease-in-out infinite;
+  }
+  .mv-dots span:nth-child(1) {
+    background: #e67e30;
+    animation-delay: 0s;
+  }
+  .mv-dots span:nth-child(2) {
+    background: #1f6fc4;
+    animation-delay: 0.16s;
+  }
+  .mv-dots span:nth-child(3) {
+    background: #1f9e5a;
+    animation-delay: 0.32s;
+  }
+
+  /* Jelly card: translucent, deep soft shadow, wobbles gently and glows on hover. */
   .mv-card {
-    @apply rounded-3xl border border-white/60 bg-white/75 shadow-xl shadow-slate-900/5 backdrop-blur-2xl;
+    @apply rounded-[2rem] border border-white/60 bg-white/70 backdrop-blur-2xl;
+    box-shadow:
+      0 24px 60px -20px rgba(15, 23, 42, 0.28),
+      0 8px 24px -12px rgba(26, 122, 224, 0.18),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.7);
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease;
+    animation: mv-jelly 7s ease-in-out infinite;
+    will-change: transform;
+  }
+  .mv-card:hover {
+    animation: none;
+    box-shadow:
+      0 28px 70px -18px rgba(15, 23, 42, 0.3),
+      0 0 40px -6px rgba(26, 122, 224, 0.45),
+      0 0 60px -10px rgba(255, 122, 26, 0.28),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.8);
+    transform: translateY(-4px) scale(1.012);
   }
 
-  .mv-btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-ocean-500/25 transition duration-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60;
-    background-image: linear-gradient(120deg, #ff7a1a 0%, #1a7ae0 55%, #16a34a 100%);
+  /* Translucent jelly buttons — only two flavours: blue and orange. */
+  .mv-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border px-6 py-3.5 text-base font-semibold backdrop-blur-md transition duration-200 active:scale-[0.94] disabled:cursor-not-allowed disabled:opacity-50;
   }
-  .mv-btn-primary:hover {
-    filter: brightness(1.06);
-    box-shadow: 0 12px 28px -8px rgba(26, 122, 224, 0.45);
+  .mv-btn-blue {
+    @apply mv-btn border-ocean-500/30 bg-ocean-500/15 text-ocean-700;
+    box-shadow: 0 6px 18px -8px rgba(26, 122, 224, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
   }
-
-  .mv-btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-full border border-black/10 bg-white/70 px-6 py-3.5 text-base font-semibold text-slate-700 backdrop-blur transition duration-200 hover:bg-white active:scale-[0.97];
+  .mv-btn-blue:hover {
+    @apply border-ocean-500/50 bg-ocean-500/25;
+    box-shadow: 0 0 24px -2px rgba(26, 122, 224, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
+    transform: translateY(-1px);
+  }
+  .mv-btn-orange {
+    @apply mv-btn border-coral-500/30 bg-coral-500/15 text-coral-600;
+    box-shadow: 0 6px 18px -8px rgba(255, 122, 26, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
+  }
+  .mv-btn-orange:hover {
+    @apply border-coral-500/55 bg-coral-500/25;
+    box-shadow: 0 0 24px -2px rgba(255, 122, 26, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
+    transform: translateY(-1px);
   }
 
   .mv-icon-btn {
-    @apply inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/45 text-white backdrop-blur-md transition duration-200 hover:bg-slate-900/60 active:scale-90;
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-full border border-ocean-500/30 bg-ocean-500/20 text-ocean-700 backdrop-blur-md transition duration-200 hover:bg-ocean-500/35 active:scale-90;
+  }
+
+  /* ---- Two-card stage ---------------------------------------------------
+     Collapsed: one card wide/tall, explainer stacked behind the collector.
+     Revealed (phone): explainer takes the top slot, collector slides down.
+     Revealed (desktop): collector holds the left slot, explainer slides right. */
+  .mv-stage {
+    position: relative;
+    width: min(100%, 26rem);
+    height: 34rem;
+    margin-inline: auto;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .mv-stage[data-revealed="true"] {
+    height: calc(34rem * 2 + 1.5rem);
+  }
+  .mv-slot {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: min(100%, 26rem);
+    height: 34rem;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s ease;
+  }
+  .mv-slot-collector {
+    z-index: 2;
+  }
+  .mv-slot-explainer {
+    z-index: 1;
+    opacity: 0;
+    transform: translateY(0) scale(0.96);
+    pointer-events: none;
+  }
+  .mv-stage[data-revealed="true"] .mv-slot-collector {
+    transform: translateY(calc(100% + 1.5rem));
+  }
+  .mv-stage[data-revealed="true"] .mv-slot-explainer {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  @media (min-width: 1024px) {
+    .mv-stage[data-revealed="true"] {
+      width: calc(26rem * 2 + 1.5rem);
+      height: 34rem;
+    }
+    .mv-stage[data-revealed="true"] .mv-slot-collector {
+      transform: translateX(0);
+    }
+    .mv-stage[data-revealed="true"] .mv-slot-explainer {
+      transform: translateX(calc(100% + 1.5rem));
+    }
   }
 
   .mv-text-gradient {
@@ -87,6 +198,23 @@ body {
   }
 }
 
+@keyframes mv-swirl {
+  from { transform: rotate(0deg) scale(1.05); }
+  to { transform: rotate(360deg) scale(1.05); }
+}
+
+@keyframes mv-dot-chase {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.55; }
+  40% { transform: translateY(-8px) scale(1.25); opacity: 1; }
+}
+
+@keyframes mv-jelly {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  25% { transform: translateY(-3px) scale(1.006, 0.994); }
+  50% { transform: translateY(0) scale(0.994, 1.006); }
+  75% { transform: translateY(2px) scale(1.004, 0.996); }
+}
+
 @keyframes mv-drift-a {
   0%, 100% { transform: translate(0, 0) scale(1); }
   50% { transform: translate(4rem, 3rem) scale(1.08); }
@@ -101,10 +229,11 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mv-blob {
-    animation: none !important;
-  }
-  .mv-fade-in {
+  .mv-blob,
+  .mv-blobs,
+  .mv-fade-in,
+  .mv-card,
+  .mv-dots span {
     animation: none !important;
   }
 }

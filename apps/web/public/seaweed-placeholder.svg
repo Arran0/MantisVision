@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-label="Cartoon seaweed">
+  <defs>
+    <linearGradient id="frond" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c76a91"/>
+      <stop offset="1" stop-color="#9c3f68"/>
+    </linearGradient>
+    <linearGradient id="frondLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cf7599"/>
+      <stop offset="1" stop-color="#a4476f"/>
+    </linearGradient>
+    <radialGradient id="bubble" cx="0.35" cy="0.3" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.5" stop-color="#cfe6ef"/>
+      <stop offset="1" stop-color="#a9cedd"/>
+    </radialGradient>
+  </defs>
+
+  <!-- sandy mound -->
+  <path d="M150 468 q106 -34 212 0 q-6 22 -30 26 h-152 q-24 -4 -30 -26 z" fill="#cf9a5c" stroke="#8f6a3a" stroke-width="6" stroke-linejoin="round"/>
+  <circle cx="222" cy="466" r="4" fill="#a6773f"/>
+  <circle cx="262" cy="472" r="3" fill="#a6773f"/>
+  <circle cx="300" cy="464" r="4" fill="#a6773f"/>
+
+  <!-- left frond -->
+  <path d="M226 452 q-70 -46 -78 -132 q-6 -66 34 -132 q10 -18 24 -6 q10 10 2 26 q-30 58 -20 118 q8 60 46 106 q10 14 -8 20 z"
+        fill="url(#frondLight)" stroke="#6f2f4d" stroke-width="7" stroke-linejoin="round"/>
+
+  <!-- right frond -->
+  <path d="M286 452 q70 -46 80 -134 q6 -60 -22 -116 q-8 -16 6 -24 q16 -8 24 8 q34 66 26 138 q-10 92 -86 142 q-18 -6 -28 -14 z"
+        fill="url(#frondLight)" stroke="#6f2f4d" stroke-width="7" stroke-linejoin="round"/>
+
+  <!-- centre bumpy frond (tallest) -->
+  <path d="M240 456
+           q-16 -60 -6 -126
+           q-14 -8 -6 -24 q10 -18 26 -10
+           q4 -30 26 -34 q26 -4 30 24
+           q16 -2 22 16 q6 18 -10 26
+           q10 66 -8 128
+           q-8 24 -34 24 q-28 0 -34 -24 z"
+        fill="url(#frond)" stroke="#6f2f4d" stroke-width="8" stroke-linejoin="round"/>
+
+  <!-- centre vein -->
+  <path d="M258 430 q-6 -110 12 -180" stroke="#7d365a" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- spots -->
+  <circle cx="286" cy="150" r="6" fill="#7d365a" opacity="0.6"/>
+  <circle cx="252" cy="210" r="5" fill="#7d365a" opacity="0.5"/>
+  <circle cx="196" cy="250" r="6" fill="#7d365a" opacity="0.5"/>
+  <circle cx="332" cy="240" r="6" fill="#7d365a" opacity="0.5"/>
+
+  <!-- bubbles -->
+  <circle cx="360" cy="140" r="22" fill="url(#bubble)" stroke="#8fb6c8" stroke-width="3"/>
+  <circle cx="150" cy="150" r="16" fill="url(#bubble)" stroke="#8fb6c8" stroke-width="3"/>
+  <circle cx="392" cy="210" r="10" fill="url(#bubble)" stroke="#8fb6c8" stroke-width="3"/>
+  <circle cx="120" cy="212" r="9" fill="url(#bubble)" stroke="#8fb6c8" stroke-width="3"/>
+  <circle cx="300" cy="96" r="11" fill="url(#bubble)" stroke="#8fb6c8" stroke-width="3"/>
+</svg>
