@@ -10,6 +10,7 @@ Run:
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import urllib.request
@@ -22,6 +23,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from config import config  # noqa: E402
 from src.api.schemas import HealthCheckResponse, PredictionResponse  # noqa: E402
 from src.inference.predictor import Predictor  # noqa: E402
+
+logger = logging.getLogger("mantis_vision.api")
+logging.basicConfig(level=logging.INFO)
+
+# A stalled or unreachable MODEL_URL must fail loudly, not hang the ASGI
+# server forever with no log output (which is exactly what a bare
+# urlretrieve() with no timeout does).
+CHECKPOINT_DOWNLOAD_TIMEOUT_S = 60
 
 app = FastAPI(title="Mantis Vision Inference API", version="0.1.0")
 
@@ -41,8 +50,13 @@ _predictor: Predictor | None = None
 def _download_checkpoint(path: Path, url: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".tmp")
-    urllib.request.urlretrieve(url, tmp_path)
+    logger.info("Downloading model checkpoint from %s ...", url)
+    with urllib.request.urlopen(url, timeout=CHECKPOINT_DOWNLOAD_TIMEOUT_S) as response:
+        with open(tmp_path, "wb") as f:
+            while chunk := response.read(1024 * 1024):
+                f.write(chunk)
     tmp_path.rename(path)
+    logger.info("Checkpoint downloaded to %s (%d bytes).", path, path.stat().st_size)
 
 
 def get_predictor() -> Predictor:
@@ -63,15 +77,26 @@ def get_predictor() -> Predictor:
 
 @app.on_event("startup")
 def _load_model_on_startup() -> None:
-    # ml/checkpoints/ is gitignored, so a fresh deploy (e.g. on Render) won't
-    # have best_model.pt unless we fetch it. Set MODEL_URL to a direct-download
-    # link (e.g. a GitHub Release asset) to have it pulled down once at boot.
+    # ml/checkpoints/ is gitignored, so a fresh deploy (e.g. on Render or a
+    # Hugging Face Space) won't have best_model.pt unless we fetch it. Set
+    # MODEL_URL to a direct-download link (e.g. a GitHub Release asset) to
+    # have it pulled down once at boot.
+    #
+    # Failures here are caught rather than left to crash the process: a bad
+    # MODEL_URL should leave the API up and reporting model_loaded: false
+    # (with the reason in the logs), not take the whole container down.
     checkpoint_path = config.checkpoints_dir / "best_model.pt"
     model_url = os.environ.get("MODEL_URL")
-    if not checkpoint_path.exists() and model_url:
-        _download_checkpoint(checkpoint_path, model_url)
-    if checkpoint_path.exists():
-        get_predictor()
+    try:
+        if not checkpoint_path.exists() and model_url:
+            _download_checkpoint(checkpoint_path, model_url)
+        elif not checkpoint_path.exists():
+            logger.warning("MODEL_URL is not set and no checkpoint is present at %s.", checkpoint_path)
+        if checkpoint_path.exists():
+            get_predictor()
+            logger.info("Model loaded successfully.")
+    except Exception:
+        logger.exception("Failed to download or load the model checkpoint.")
 
 
 @app.get("/health", response_model=HealthCheckResponse)
