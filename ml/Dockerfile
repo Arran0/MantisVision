@@ -11,6 +11,13 @@ COPY config.py .
 COPY src ./src
 
 ENV PORT=8000
+# Keep native math libraries single-threaded and Grad-CAM off by default so the
+# service fits a 512 MB free tier. Raise these (and ENABLE_GRADCAM=true) on a
+# larger instance. A single uvicorn worker keeps only one model copy in memory.
+ENV OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    ENABLE_GRADCAM=false
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT} --workers 1"]

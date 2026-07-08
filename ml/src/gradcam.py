@@ -16,9 +16,6 @@ from pathlib import Path
 import numpy as np
 import torch
 from PIL import Image
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import config  # noqa: E402
@@ -34,6 +31,13 @@ def generate_gradcam(
     device: torch.device,
 ) -> np.ndarray:
     """Returns an RGB uint8 heatmap-overlaid image (H, W, 3), values 0-255."""
+    # Imported here (not at module load) so the API can import this module
+    # without pulling in the pytorch-grad-cam / OpenCV stack unless a heatmap
+    # is actually requested — see ENABLE_GRADCAM in the predictor.
+    from pytorch_grad_cam import GradCAM
+    from pytorch_grad_cam.utils.image import show_cam_on_image
+    from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+
     transform = build_transforms(config, train=False)
     input_tensor = transform(image.convert("RGB")).unsqueeze(0).to(device)
 
