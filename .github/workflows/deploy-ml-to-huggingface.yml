@@ -1,0 +1,34 @@
+name: Deploy ML API to Hugging Face Spaces
+
+# Mirrors the ml/ subfolder to a Hugging Face Space (Docker SDK) on every
+# push that touches it, so the Space stays in sync the same way Render's
+# git-based auto-deploy did. Setup steps: docs/DEPLOY_HUGGINGFACE.md
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ml/**"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push ml/ to the Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ secrets.HF_SPACE }}
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE" ]; then
+            echo "::error::Missing HF_TOKEN or HF_SPACE repository secret. See docs/DEPLOY_HUGGINGFACE.md." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add space "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
+          git subtree split --prefix=ml -b hf-space-deploy
+          git push space hf-space-deploy:main --force
