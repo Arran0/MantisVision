@@ -31,10 +31,9 @@ const config: Config = {
       },
       fontFamily: {
         sans: [
+          "var(--font-poppins)",
           "-apple-system",
           "BlinkMacSystemFont",
-          "SF Pro Text",
-          "SF Pro Display",
           "Segoe UI",
           "Roboto",
           "Helvetica",

@@ -15,29 +15,28 @@ body {
 }
 
 @layer components {
-  /* Drifting mantis-shrimp gradient blobs used by <Background />. */
+  /* Three gradient blobs placed 120° apart on a circle around the viewport
+     centre, all at the same radius so the group swirls as a perfect circle.
+     Sizes are ~25% smaller than before. They sit still at rest and only spin
+     while analysing. */
   .mv-blob {
     @apply absolute rounded-full blur-3xl;
-    opacity: 0.55;
+    top: 50%;
+    left: 50%;
+    opacity: 0.5;
     will-change: transform;
   }
   .mv-blob-coral {
-    @apply h-[34rem] w-[34rem] bg-coral-500;
-    top: -12rem;
-    left: -10rem;
-    animation: mv-drift-a 26s ease-in-out infinite;
+    @apply h-[25.5rem] w-[25.5rem] bg-coral-500;
+    transform: translate(-50%, -50%) translate(0, -15rem);
   }
   .mv-blob-ocean {
-    @apply h-[38rem] w-[38rem] bg-ocean-500;
-    top: -6rem;
-    right: -14rem;
-    animation: mv-drift-b 32s ease-in-out infinite;
+    @apply h-[28.5rem] w-[28.5rem] bg-ocean-500;
+    transform: translate(-50%, -50%) translate(12.99rem, 7.5rem);
   }
   .mv-blob-seaweed {
-    @apply h-[36rem] w-[36rem] bg-seaweed-500;
-    bottom: -16rem;
-    left: 20%;
-    animation: mv-drift-c 29s ease-in-out infinite;
+    @apply h-[27rem] w-[27rem] bg-seaweed-500;
+    transform: translate(-50%, -50%) translate(-12.99rem, 7.5rem);
   }
   .mv-vignette {
     background: radial-gradient(120% 90% at 50% 0%, transparent 40%, rgba(15, 23, 42, 0.06) 100%);
@@ -128,7 +127,7 @@ body {
      Revealed (desktop): collector holds the left slot, explainer slides right. */
   .mv-stage {
     position: relative;
-    width: min(100%, 26rem);
+    width: min(100%, 30rem);
     height: 34rem;
     margin-inline: auto;
     transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
@@ -140,7 +139,7 @@ body {
     position: absolute;
     top: 0;
     left: 0;
-    width: min(100%, 26rem);
+    width: min(100%, 30rem);
     height: 34rem;
     transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s ease;
   }
@@ -163,15 +162,24 @@ body {
   }
 
   @media (min-width: 1024px) {
+    /* Each card is 40% of the browser width; revealed shows both side by side. */
+    .mv-stage {
+      width: 40vw;
+      height: 36rem;
+    }
     .mv-stage[data-revealed="true"] {
-      width: calc(26rem * 2 + 1.5rem);
-      height: 34rem;
+      width: calc(80vw + 2rem);
+      height: 36rem;
+    }
+    .mv-slot {
+      width: 40vw;
+      height: 36rem;
     }
     .mv-stage[data-revealed="true"] .mv-slot-collector {
       transform: translateX(0);
     }
     .mv-stage[data-revealed="true"] .mv-slot-explainer {
-      transform: translateX(calc(100% + 1.5rem));
+      transform: translateX(calc(100% + 2rem));
     }
   }
 
@@ -199,8 +207,8 @@ body {
 }
 
 @keyframes mv-swirl {
-  from { transform: rotate(0deg) scale(1.05); }
-  to { transform: rotate(360deg) scale(1.05); }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes mv-dot-chase {
@@ -213,19 +221,6 @@ body {
   25% { transform: translateY(-3px) scale(1.006, 0.994); }
   50% { transform: translateY(0) scale(0.994, 1.006); }
   75% { transform: translateY(2px) scale(1.004, 0.996); }
-}
-
-@keyframes mv-drift-a {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(4rem, 3rem) scale(1.08); }
-}
-@keyframes mv-drift-b {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(-3rem, 4rem) scale(1.06); }
-}
-@keyframes mv-drift-c {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(3rem, -3rem) scale(1.1); }
 }
 
 @media (prefers-reduced-motion: reduce) {

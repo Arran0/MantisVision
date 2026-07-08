@@ -174,8 +174,9 @@ export function UploadCard() {
             Let&rsquo;s analyse a seaweed!
           </p>
 
-          {/* Image holder — placeholder, staged photo, or live camera. */}
-          <div className="relative flex-1 min-h-0 overflow-hidden rounded-[1.5rem] border border-white/50 bg-ocean-50/40">
+          {/* Image holder — placeholder, staged photo, or live camera.
+              Background matches the card so the placeholder blends in. */}
+          <div className="relative flex-1 min-h-0 overflow-hidden rounded-[1.5rem] border border-white/60 bg-white/60">
             {cameraActive ? (
               // eslint-disable-next-line jsx-a11y/media-has-caption
               <video
@@ -248,13 +249,6 @@ export function UploadCard() {
               >
                 {loading ? "Analysing…" : error ? "Try again" : "Analyse"}
               </button>
-
-              {(selection || revealed) && (
-                <button type="button" onClick={reset} className="mv-btn-orange w-full">
-                  <PlusIcon />
-                  Scan another
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -297,10 +291,3 @@ function CloseIcon() {
   );
 }
 
-function PlusIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden>
-      <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
