@@ -79,6 +79,7 @@ python scripts/export_model.py
 ```
 
 Conditions: `Healthy`, `Disease`, `Decay`, `Dried`, `Background`. Class-folder
-names encode structured labels (e.g. `<slug>_Disease_Moderate_IceIce`) — the
-naming convention and labeling standards are in
+names encode structured labels, severity before condition (e.g.
+`<slug>_Moderate_Disease_IceIce`, `<slug>_Low_Decay`) — the naming convention
+and labeling standards are in
 [`../docs/DATASET_LABELING_GUIDE.md`](../docs/DATASET_LABELING_GUIDE.md).

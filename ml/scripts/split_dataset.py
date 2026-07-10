@@ -1,9 +1,10 @@
 """One-time utility: split a flat labeled folder into train/validation/test.
 
 Input layout (e.g. after bulk-labeling raw photos) — folder names must follow
-the naming convention in src/data/labels.py:
+the naming convention in src/data/labels.py (severity before condition):
     raw/<species_slug>_Healthy/*.jpg
-    raw/<species_slug>_Disease_Moderate_IceIce/*.jpg
+    raw/<species_slug>_Low_Decay/*.jpg
+    raw/<species_slug>_Moderate_Disease_IceIce/*.jpg
     raw/Background/*.jpg
     ...
 

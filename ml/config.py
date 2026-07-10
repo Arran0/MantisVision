@@ -43,10 +43,17 @@ CONDITION_CLASSES = ["Background", "Healthy", "Disease", "Decay", "Dried"]
 # categorised into a specific subtype.
 DISEASE_SUBTYPES = ["IceIce", "Epiphyte", "Bacterial", "Bleaching", "Unknown"]
 
-# Severity tokens that may appear in a Disease folder name. Severity sets the
-# training anchor for the health score; at inference severity is read back
-# out of the regressed score (see DISEASE_MODERATE_MIN below).
+# Severity tokens that prefix a Decay/Dried/Disease folder name (e.g.
+# <slug>_Low_Decay, <slug>_Moderate_Disease_IceIce). Decay and Dried only ever
+# use "Low" — there are no Moderate/Healthy-severity buckets for them, since
+# by definition a decayed or dried specimen is already at the bottom of the
+# health range. Disease uses both. Severity sets the training anchor for the
+# health score; at inference Disease's severity is read back out of the
+# regressed score (see DISEASE_MODERATE_MIN below) rather than trusted as-is.
 SEVERITIES = ["Moderate", "Low"]
+
+# The only severity Decay/Dried folders may use.
+FIXED_SEVERITY_CONDITIONS = {"Decay": "Low", "Dried": "Low"}
 
 # --- Heuristic anchors ----------------------------------------------------
 # Discrete labels have no ground-truth number attached, so we anchor each
@@ -71,14 +78,6 @@ DECAYED_EXTENT_ANCHORS: dict[str, float] = {"Decay": 80.0, "Disease": 20.0}
 # At inference, a Disease prediction is called "Moderate" if the regressed
 # health score is at or above this, else "Low".
 DISEASE_MODERATE_MIN: float = 45.0
-
-# Discrete display level derived from condition alone (Disease is special-cased
-# by score, so it's absent here).
-CONDITION_TO_LEVEL: dict[str, str] = {
-    "Healthy": "Healthy",
-    "Decay": "Low",
-    "Dried": "Low",
-}
 
 
 @dataclass

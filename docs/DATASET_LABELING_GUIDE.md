@@ -19,26 +19,33 @@ ml/dataset/<species_slug>/
 ```
 
 Class-folder names encode structured labels (parsed in
-`ml/src/data/labels.py`):
+`ml/src/data/labels.py`). **Severity comes before the condition token**, so
+every non-Healthy, non-Background folder has the shape
+`<species_slug>_<Severity>_<Decay|Dried|Disease>...`:
 
 | Condition | Folder name |
 |---|---|
 | Healthy | `<species_slug>_Healthy` |
-| Decay | `<species_slug>_Decay` |
-| Dried | `<species_slug>_Dried` |
-| Disease | `<species_slug>_Disease_<Severity>_<Subtype>[_<DiseaseName>]` |
+| Decay | `<species_slug>_Low_Decay` |
+| Dried | `<species_slug>_Low_Dried` |
+| Disease | `<species_slug>_<Severity>_Disease_<Subtype>[_<DiseaseName>]` |
 | Background (no seaweed) | `Background` |
 
-Example: `Kappaphycus_alvarezii_Disease_Moderate_IceIce`,
-`Kappaphycus_alvarezii_Disease_Low_Bacterial_Vibrio_sp`, `Background`.
+Example: `Kappaphycus_alvarezii_Moderate_Disease_IceIce`,
+`Kappaphycus_alvarezii_Low_Disease_Bacterial_Vibrio_sp`, `Background`.
 
-- **Severity** ∈ `Moderate` (small/localized patch) or `Low` (widespread).
-  Severity sets the health-score training anchor; at inference the model
-  re-derives Moderate/Low from its regressed 0–100 score.
-- **Subtype** ∈ `IceIce`, `Epiphyte`, `Bacterial`, `Bleaching`, `Unknown`.
-- **DiseaseName** is a free-form trailing token (e.g. a specific pathogen).
-  It's parsed and recorded as **metadata only** — it is not its own model
-  head yet.
+- **Severity** ∈ `Moderate` (small/localized patch) or `Low` (widespread) —
+  but **Decay and Dried only ever use `Low`**. There is no
+  Moderate/Healthy-severity bucket for them: by definition a decayed or dried
+  specimen is already at the bottom of the health range, so only one bucket
+  each exists. Disease uses both `Moderate` and `Low`. Severity sets the
+  health-score training anchor; at inference the model re-derives Disease's
+  Moderate/Low from its regressed 0–100 score (Decay/Dried are always "Low").
+- **Subtype** (Disease only) ∈ `IceIce`, `Epiphyte`, `Bacterial`, `Bleaching`,
+  `Unknown`.
+- **DiseaseName** (Disease only) is a free-form trailing token (e.g. a
+  specific pathogen). It's parsed and recorded as **metadata only** — it is
+  not its own model head yet.
 
 The `Background` class is the N+1 negative class. Fill it with **diverse
 non-seaweed images**: empty underwater scenes, rocks, ropes, sand, other
@@ -91,10 +98,12 @@ per-farm/per-region analysis later.
 Bright coloration, no whitening, no broken branches.
 
 ### Decay
-Tissue melting, brown patches, rot.
+Tissue melting, brown patches, rot. Always folder severity `Low` — no
+Moderate/Healthy variant.
 
 ### Dried
 Largely dried out/bleached, detached from the line, little living tissue.
+Always folder severity `Low` — no Moderate/Healthy variant.
 
 ### Disease
 Visible lesions / infection symptoms not explained by grazing or general
