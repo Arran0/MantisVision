@@ -1,14 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { HEALTH_CLASSES } from "@/lib/healthClasses";
+import { CONDITIONS, SEVERITIES, DISEASE_SUBTYPES } from "@/lib/taxonomy";
 
 export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   const [file, setFile] = useState<File | null>(null);
+  const [condition, setCondition] = useState<string>("Healthy");
+  const [severity, setSeverity] = useState<string>(SEVERITIES[0]);
+  const [subtype, setSubtype] = useState<string>(DISEASE_SUBTYPES[0]);
+  const [diseaseName, setDiseaseName] = useState("");
   const [species, setSpecies] = useState("Kappaphycus alvarezii");
   const [colour, setColour] = useState("");
-  const [health, setHealth] = useState<string>(HEALTH_CLASSES[0]);
   const [notes, setNotes] = useState("");
+
+  // Optional numeric overrides — blank falls back to the heuristic anchors in ml/config.py.
+  const [healthScore, setHealthScore] = useState("");
+  const [driedPct, setDriedPct] = useState("");
+  const [decayedPct, setDecayedPct] = useState("");
+
   const [showMore, setShowMore] = useState(false);
   const [farm, setFarm] = useState("");
   const [camera, setCamera] = useState("");
@@ -22,10 +31,17 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isDisease = condition === "Disease";
+  const isBackground = condition === "Background";
+
   function resetForm() {
     setFile(null);
     setColour("");
     setNotes("");
+    setDiseaseName("");
+    setHealthScore("");
+    setDriedPct("");
+    setDecayedPct("");
     setFarm("");
     setCamera("");
     setCapturedAt("");
@@ -47,9 +63,19 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("species", species);
-    formData.append("colour", colour);
-    formData.append("health", health);
+    formData.append("condition", condition);
+    if (isDisease) {
+      formData.append("severity", severity);
+      formData.append("subtype", subtype);
+      formData.append("diseaseName", diseaseName);
+    }
+    if (!isBackground) {
+      formData.append("species", species);
+      formData.append("colour", colour);
+      formData.append("healthScore", healthScore);
+      formData.append("driedPct", driedPct);
+      formData.append("decayedPct", decayedPct);
+    }
     formData.append("notes", notes);
     formData.append("farm", farm);
     formData.append("camera", camera);
@@ -90,42 +116,129 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
         />
       </label>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-          Species
-          <input
-            type="text"
-            value={species}
-            onChange={(event) => setSpecies(event.target.value)}
-            className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-          Colour
-          <input
-            type="text"
-            value={colour}
-            onChange={(event) => setColour(event.target.value)}
-            placeholder="e.g. dark green"
-            className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-          Health
-          <select
-            required
-            value={health}
-            onChange={(event) => setHealth(event.target.value)}
-            className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-          >
-            {HEALTH_CLASSES.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+        Condition
+        <select
+          required
+          value={condition}
+          onChange={(event) => setCondition(event.target.value)}
+          className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+        >
+          {CONDITIONS.map((option) => (
+            <option key={option} value={option}>
+              {option === "Background" ? "Background (no seaweed)" : option}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {isDisease && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            Severity
+            <select
+              value={severity}
+              onChange={(event) => setSeverity(event.target.value)}
+              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+            >
+              {SEVERITIES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            Subtype
+            <select
+              value={subtype}
+              onChange={(event) => setSubtype(event.target.value)}
+              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+            >
+              {DISEASE_SUBTYPES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            Disease name (optional)
+            <input
+              type="text"
+              value={diseaseName}
+              onChange={(event) => setDiseaseName(event.target.value)}
+              placeholder="e.g. Vibrio_sp"
+              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+            />
+          </label>
+        </div>
+      )}
+
+      {!isBackground && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+              Species
+              <input
+                type="text"
+                value={species}
+                onChange={(event) => setSpecies(event.target.value)}
+                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+              Colour
+              <input
+                type="text"
+                value={colour}
+                onChange={(event) => setColour(event.target.value)}
+                placeholder="e.g. dark green"
+                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Health score (0–100, optional)
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={healthScore}
+                onChange={(event) => setHealthScore(event.target.value)}
+                placeholder="anchor if blank"
+                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Dried % (optional)
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={driedPct}
+                onChange={(event) => setDriedPct(event.target.value)}
+                placeholder="anchor if blank"
+                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Decayed % (optional)
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={decayedPct}
+                onChange={(event) => setDecayedPct(event.target.value)}
+                placeholder="anchor if blank"
+                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
+              />
+            </label>
+          </div>
+        </>
+      )}
 
       <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
         Notes

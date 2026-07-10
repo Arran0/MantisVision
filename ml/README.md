@@ -10,7 +10,10 @@ pinned: false
 
 # Mantis Vision — ML Pipeline
 
-Health classifier for *Kappaphycus alvarezii* (Phase 1 / MVP). See
+Multi-head seaweed analyzer for *Kappaphycus alvarezii*. A shared
+EfficientNet-B0 backbone feeds five heads: condition (incl. a Background
+"no seaweed" class), a 0–100 health-score regression, a masked disease
+subtype, and dried/decayed extent regression. See
 [`../docs/STEP_BY_STEP.md`](../docs/STEP_BY_STEP.md) for the full walkthrough;
 this file is the quick reference once you already know the pipeline.
 
@@ -24,24 +27,27 @@ inert everywhere else (GitHub just renders it as a normal README).
 
 ```
 ml/
-  config.py              # single source of truth: paths, hyperparams, class list
-  dataset/                # train/validation/test/<Class>/ images — lives on Kaggle, gitignored here
+  config.py              # single source of truth: species, taxonomy, anchors, hyperparams
+  dataset/<slug>/         # {train,validation,test}/<class_folder>/ — lives on Kaggle, gitignored here
   checkpoints/             # saved model weights (gitignored)
   reports/                 # evaluation outputs: confusion matrix, metrics json (gitignored)
   logs/                    # run logs (gitignored)
-  metadata/labels_template.csv
+  metadata/labels_template.csv, label_map.csv (generated)
   src/
-    data/                  # transforms, ImageFolder dataloaders, dataset validation CLI
-    models/efficientnet.py # transfer-learning model + checkpoint save/load
-    train.py               # two-phase training (frozen head -> fine-tune) with early stopping
-    evaluate.py            # accuracy/precision/recall/F1/confusion matrix/ROC AUC on the test split
-    gradcam.py             # Grad-CAM explainability
-    inference/             # predictor.py (full MVP output) + explanations.py (text templates)
+    data/                  # transforms, labels.py (folder-name parser), SeaweedDataset, validation CLI
+    models/efficientnet.py # multi-head model + checkpoint save/load
+    losses.py              # multi-task masked loss shared by train/evaluate
+    train.py               # two-phase training (frozen heads -> fine-tune) with early stopping
+    evaluate.py            # per-head metrics: condition report/confusion + subtype + regression MAE
+    gradcam.py             # Grad-CAM explainability (targets the condition head)
+    inference/             # predictor.py (full output) + explanations.py (text templates)
     api/main.py             # FastAPI inference service
   scripts/
     split_dataset.py        # flat labeled folder -> 70/15/15 train/val/test split
+    build_label_map.py      # scan dataset -> metadata/label_map.csv (folder -> integer IDs)
     kaggle_sync.py           # push/pull the labeled dataset to/from a Kaggle Dataset
-    export_model.py         # checkpoint -> ONNX for web/mobile deployment
+    export_model.py         # checkpoint -> multi-output ONNX for web/mobile deployment
+    retrain_and_report.py   # CI retraining orchestration (admin "Retrain" button)
 ```
 
 ## Quick commands
@@ -51,8 +57,9 @@ cd ml
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 1. get labeled photos into dataset/train|validation|test/<ClassName>/
+# 1. get labeled photos into dataset/<slug>/{train,validation,test}/<class_folder>/
 python scripts/kaggle_sync.py download --dataset <username>/mantis-vision-kappaphycus-health
+python scripts/build_label_map.py        # regenerate metadata/label_map.csv
 python -m src.data.validate_dataset      # sanity check before training
 
 # 2. train
@@ -71,6 +78,7 @@ uvicorn src.api.main:app --reload --port 8000
 python scripts/export_model.py
 ```
 
-Class labels (folder names must match exactly): `Healthy`, `Moderate`, `Low`,
-`Decay`, `Dried`, `Disease`. Labeling standards are in
+Conditions: `Healthy`, `Disease`, `Decay`, `Dried`, `Background`. Class-folder
+names encode structured labels (e.g. `<slug>_Disease_Moderate_IceIce`) — the
+naming convention and labeling standards are in
 [`../docs/DATASET_LABELING_GUIDE.md`](../docs/DATASET_LABELING_GUIDE.md).

@@ -38,6 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import config  # noqa: E402
 from scripts.split_dataset import split_class  # noqa: E402
+from src.data.labels import build_class_folder  # noqa: E402
 
 REQUEST_TIMEOUT_S = 60
 
@@ -73,7 +74,12 @@ def update_run(model_run_id: str, **fields) -> None:
 
 def fetch_labeled_images() -> list[dict]:
     result = _supabase_request(
-        "GET", "training_images", params="?status=eq.labeled&select=id,storage_path,health"
+        "GET",
+        "training_images",
+        params=(
+            "?status=eq.labeled"
+            "&select=id,storage_path,condition,severity,subtype,disease_name"
+        ),
     )
     return result or []
 
@@ -110,31 +116,41 @@ def maybe_pull_kaggle_archive() -> None:
 
 
 def materialize_new_labels(images: list[dict], raw_dir: Path) -> int:
+    """Download each labeled row and stage it under its canonical class folder
+    (built from condition/severity/subtype/disease_name via the shared
+    labels.build_class_folder), then split each class into train/val/test."""
     by_class: dict[str, list[Path]] = {}
     for image in images:
-        health = image["health"]
-        if health not in config.class_names:
-            print(f"Skipping training_images row {image['id']}: unrecognized class {health!r}.")
+        try:
+            class_folder = build_class_folder(
+                condition=image["condition"],
+                severity=image.get("severity"),
+                subtype=image.get("subtype"),
+                disease_name=image.get("disease_name"),
+                species_slug=config.species_slug,
+            )
+        except Exception as e:  # noqa: BLE001 - skip a malformed row, don't abort the run
+            print(f"Skipping training_images row {image['id']}: {e}")
             continue
         ext = Path(image["storage_path"]).suffix or ".jpg"
-        dest = raw_dir / health / f"{image['id']}{ext}"
+        dest = raw_dir / class_folder / f"{image['id']}{ext}"
         download_storage_object(image["storage_path"], dest)
-        by_class.setdefault(health, []).append(dest)
+        by_class.setdefault(class_folder, []).append(dest)
 
     total = 0
-    for class_name, files in by_class.items():
+    for class_folder, files in by_class.items():
         splits = split_class(sorted(files), config.seed)
         for split_name, split_files in splits.items():
             dest_dir = {
                 "train": config.train_dir,
                 "validation": config.val_dir,
                 "test": config.test_dir,
-            }[split_name] / class_name
+            }[split_name] / class_folder
             dest_dir.mkdir(parents=True, exist_ok=True)
             for f in split_files:
                 f.rename(dest_dir / f.name)
         total += len(files)
-        print(f"{class_name}: added {len(files)} newly labeled images.")
+        print(f"{class_folder}: added {len(files)} newly labeled images.")
     return total
 
 
@@ -191,14 +207,32 @@ def main() -> None:
         raw_dir = config.dataset_dir / "_incoming"
         new_count = materialize_new_labels(images, raw_dir)
 
-        from src.data.validate_dataset import validate_split
+        # Refresh the human-auditable folder -> integer-ID map from what's now
+        # on disk, so it always reflects the classes this run actually trains on.
+        from scripts.build_label_map import scan_folders
 
-        train_counts = validate_split(config.train_dir, config.class_names)
-        empty_classes = [name for name, count in train_counts.items() if count == 0]
-        if empty_classes:
+        rows = scan_folders(config.train_dir)
+        (config.metadata_dir / "label_map.csv").parent.mkdir(parents=True, exist_ok=True)
+        with open(config.metadata_dir / "label_map.csv", "w", newline="") as f:
+            import csv
+
+            from scripts.build_label_map import COLUMNS
+
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        # The model needs every condition represented in the train split — an
+        # empty condition class would crash training on an empty ImageFolder
+        # class and make the confusion matrix meaningless.
+        from src.data.validate_dataset import condition_counts
+
+        counts = condition_counts(config.train_dir)
+        empty = [name for name, count in counts.items() if count == 0]
+        if empty:
             raise RuntimeError(
-                f"Cannot train: no training images for class(es) {empty_classes}. "
-                "Label at least one image per class first."
+                f"Cannot train: no training images for condition(s) {empty}. "
+                "Label at least one image per condition (including Background) first."
             )
 
         from src.evaluate import evaluate

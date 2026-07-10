@@ -19,29 +19,49 @@ from src.models.efficientnet import load_checkpoint  # noqa: E402
 from src.utils.seed import get_device  # noqa: E402
 
 
+# The multi-head model's forward returns a dict; ONNX needs ordered tensor
+# outputs, so we export through a small wrapper that returns a fixed tuple.
+_OUTPUT_NAMES = ["condition", "health_score", "disease_subtype", "dried_extent", "decayed_extent"]
+
+
+class _TupleOutputWrapper(torch.nn.Module):
+    def __init__(self, model: torch.nn.Module) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(self, x):
+        out = self.model(x)
+        return tuple(out[name] for name in _OUTPUT_NAMES)
+
+
 def main() -> None:
     device = get_device(config.device)
     checkpoint_path = config.checkpoints_dir / "best_model.pt"
-    model, class_names = load_checkpoint(checkpoint_path, device)
+    model, condition_classes, subtype_classes, species = load_checkpoint(checkpoint_path, device)
 
     dummy_input = torch.randn(1, 3, config.image_size, config.image_size, device=device)
-    out_path = config.checkpoints_dir / "health_classifier.onnx"
+    out_path = config.checkpoints_dir / "seaweed_multihead.onnx"
 
     torch.onnx.export(
-        model,
+        _TupleOutputWrapper(model),
         dummy_input,
         str(out_path),
         input_names=["image"],
-        output_names=["logits"],
-        dynamic_axes={"image": {0: "batch"}, "logits": {0: "batch"}},
+        output_names=_OUTPUT_NAMES,
+        dynamic_axes={"image": {0: "batch"}, **{name: {0: "batch"} for name in _OUTPUT_NAMES}},
         opset_version=17,
     )
 
     labels_path = config.checkpoints_dir / "class_names.json"
-    labels_path.write_text(json.dumps(class_names, indent=2))
+    labels_path.write_text(
+        json.dumps(
+            {"species": species, "condition_classes": condition_classes, "subtype_classes": subtype_classes},
+            indent=2,
+        )
+    )
 
     print(f"Exported ONNX model -> {out_path}")
-    print(f"Saved class order -> {labels_path}")
+    print(f"Saved class metadata -> {labels_path}")
 
 
 if __name__ == "__main__":

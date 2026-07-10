@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/supabase/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isHealthClass } from "@/lib/healthClasses";
+import { isCondition, isSeverity, isDiseaseSubtype } from "@/lib/taxonomy";
 import type { TrainingImage } from "@/lib/types";
 
 const BUCKET = "training-images";
@@ -21,6 +21,12 @@ function numberOrNull(value: FormDataEntryValue | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function pctOrNull(value: FormDataEntryValue | null): number | null {
+  const parsed = numberOrNull(value);
+  if (parsed === null) return null;
+  return Math.max(0, Math.min(100, parsed));
+}
+
 function stringOrNull(value: FormDataEntryValue | null): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
@@ -31,29 +37,45 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const file = formData.get("file");
-  const health = formData.get("health");
+  const condition = formData.get("condition");
 
   if (!(file instanceof File) || !file.type.startsWith("image/")) {
     return NextResponse.json({ error: "Missing or invalid 'file' — must be an image." }, { status: 400 });
   }
-  if (typeof health !== "string" || !isHealthClass(health)) {
-    return NextResponse.json({ error: "'health' must be one of the known health classes." }, { status: 400 });
+  if (typeof condition !== "string" || !isCondition(condition)) {
+    return NextResponse.json({ error: "'condition' must be one of the known conditions." }, { status: 400 });
   }
 
-  const species = stringOrNull(formData.get("species")) ?? "Kappaphycus alvarezii";
-  const colour = stringOrNull(formData.get("colour"));
-  const notes = stringOrNull(formData.get("notes"));
-  const farm = stringOrNull(formData.get("farm"));
-  const camera = stringOrNull(formData.get("camera"));
-  const capturedAt = stringOrNull(formData.get("capturedAt"));
-  const waterTemperatureC = numberOrNull(formData.get("waterTemperatureC"));
-  const salinityPpt = numberOrNull(formData.get("salinityPpt"));
-  const depthM = numberOrNull(formData.get("depthM"));
-  const gpsLat = numberOrNull(formData.get("gpsLat"));
-  const gpsLng = numberOrNull(formData.get("gpsLng"));
+  const isBackground = condition === "Background";
+  const isDisease = condition === "Disease";
+
+  let severity: string | null = null;
+  let subtype: string | null = null;
+  let diseaseName: string | null = null;
+  if (isDisease) {
+    const sev = formData.get("severity");
+    const sub = formData.get("subtype");
+    if (typeof sev !== "string" || !isSeverity(sev)) {
+      return NextResponse.json({ error: "Disease requires a valid 'severity'." }, { status: 400 });
+    }
+    if (typeof sub !== "string" || !isDiseaseSubtype(sub)) {
+      return NextResponse.json({ error: "Disease requires a valid 'subtype'." }, { status: 400 });
+    }
+    severity = sev;
+    subtype = sub;
+    // Disease name is free-form but must not contain underscores/spaces that
+    // would break the folder-naming convention when the retrain step
+    // materializes it into <...>_<Subtype>_<DiseaseName>.
+    const rawName = stringOrNull(formData.get("diseaseName"));
+    diseaseName = rawName ? rawName.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || null : null;
+  }
+
+  const species = isBackground
+    ? null
+    : stringOrNull(formData.get("species")) ?? "Kappaphycus alvarezii";
 
   const admin = createAdminClient();
-  const storagePath = `${health}/${crypto.randomUUID()}.${extensionFor(file)}`;
+  const storagePath = `${condition}/${crypto.randomUUID()}.${extensionFor(file)}`;
 
   const { error: uploadError } = await admin.storage
     .from(BUCKET)
@@ -63,21 +85,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 502 });
   }
 
+  const gpsLat = numberOrNull(formData.get("gpsLat"));
+  const gpsLng = numberOrNull(formData.get("gpsLng"));
+
   const { data: row, error: insertError } = await admin
     .from("training_images")
     .insert({
       created_by: auth.context.userId,
       storage_path: storagePath,
+      condition,
+      is_background: isBackground,
+      severity,
+      subtype,
+      disease_name: diseaseName,
       species,
-      colour,
-      health,
-      notes,
-      farm,
-      camera,
-      captured_at: capturedAt,
-      water_temperature_c: waterTemperatureC,
-      salinity_ppt: salinityPpt,
-      depth_m: depthM,
+      colour: isBackground ? null : stringOrNull(formData.get("colour")),
+      health_score: isBackground ? null : pctOrNull(formData.get("healthScore")),
+      dried_pct: isBackground ? null : pctOrNull(formData.get("driedPct")),
+      decayed_pct: isBackground ? null : pctOrNull(formData.get("decayedPct")),
+      notes: stringOrNull(formData.get("notes")),
+      farm: stringOrNull(formData.get("farm")),
+      camera: stringOrNull(formData.get("camera")),
+      captured_at: stringOrNull(formData.get("capturedAt")),
+      water_temperature_c: numberOrNull(formData.get("waterTemperatureC")),
+      salinity_ppt: numberOrNull(formData.get("salinityPpt")),
+      depth_m: numberOrNull(formData.get("depthM")),
       gps: gpsLat !== null && gpsLng !== null ? `(${gpsLng},${gpsLat})` : null,
     })
     .select()
@@ -106,7 +138,9 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
   const { data: rows, error } = await admin
     .from("training_images")
-    .select("id, created_at, created_by, species, colour, health, notes, farm, status, storage_path")
+    .select(
+      "id, created_at, created_by, species, colour, condition, severity, subtype, disease_name, notes, farm, status, storage_path"
+    )
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -125,7 +159,10 @@ export async function GET(request: NextRequest) {
         createdBy: row.created_by,
         species: row.species,
         colour: row.colour,
-        health: row.health,
+        condition: row.condition,
+        severity: row.severity,
+        subtype: row.subtype,
+        diseaseName: row.disease_name,
         notes: row.notes,
         farm: row.farm,
         status: row.status,

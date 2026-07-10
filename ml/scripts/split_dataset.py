@@ -1,12 +1,15 @@
 """One-time utility: split a flat labeled folder into train/validation/test.
 
-Input layout (e.g. after bulk-labeling raw photos):
-    raw/Healthy/*.jpg
-    raw/Moderate/*.jpg
+Input layout (e.g. after bulk-labeling raw photos) — folder names must follow
+the naming convention in src/data/labels.py:
+    raw/<species_slug>_Healthy/*.jpg
+    raw/<species_slug>_Disease_Moderate_IceIce/*.jpg
+    raw/Background/*.jpg
     ...
 
-Output: copies files into ml/dataset/{train,validation,test}/<Class>/ using
-the 70/15/15 split from the spec, with a fixed seed for reproducibility.
+Output: copies files into
+dataset/<species_slug>/{train,validation,test}/<class_folder>/ using the
+70/15/15 split from the spec, with a fixed seed for reproducibility.
 
 Usage:
     python scripts/split_dataset.py --source /path/to/raw
@@ -21,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import config  # noqa: E402
+from src.data.labels import LabelParseError, parse_class_folder  # noqa: E402
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 SPLIT_RATIOS = {"train": 0.70, "validation": 0.15, "test": 0.15}
@@ -56,8 +60,10 @@ def main() -> None:
         if not class_dir.is_dir():
             continue
         class_name = class_dir.name
-        if class_name not in config.class_names:
-            print(f"Skipping unrecognized class folder: {class_name}")
+        try:
+            parse_class_folder(class_name, config.species_slug)
+        except LabelParseError as e:
+            print(f"Skipping unrecognized class folder {class_name!r}: {e}")
             continue
 
         # Sorted so the seeded shuffle below is reproducible across machines —

@@ -1,7 +1,14 @@
 export interface PredictionResult {
   species: string;
-  health: string;
+  isSeaweed: boolean;
+  condition: string;
+  // Derived display level (Healthy/Moderate/Low). null for Background/no seaweed.
+  health: string | null;
+  healthScore: number | null; // 0-100
   confidence: number;
+  diseaseSubtype: string | null;
+  driedPct: number | null;
+  decayedPct: number | null;
   explanation: string;
   recommendation: string;
   gradcamPngBase64: string;
@@ -11,9 +18,12 @@ export interface TrainingImage {
   id: string;
   createdAt: string;
   createdBy: string | null;
-  species: string;
+  species: string | null;
   colour: string | null;
-  health: string;
+  condition: string;
+  severity: string | null;
+  subtype: string | null;
+  diseaseName: string | null;
   notes: string | null;
   farm: string | null;
   status: string;

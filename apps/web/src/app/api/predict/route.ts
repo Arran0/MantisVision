@@ -59,8 +59,14 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     species: payload.species,
+    isSeaweed: payload.is_seaweed,
+    condition: payload.condition,
     health: payload.health,
+    healthScore: payload.health_score,
     confidence: payload.confidence,
+    diseaseSubtype: payload.disease_subtype,
+    driedPct: payload.dried_pct,
+    decayedPct: payload.decayed_pct,
     explanation: payload.explanation,
     recommendation: payload.recommendation,
     gradcamPngBase64: payload.gradcam_png_base64,

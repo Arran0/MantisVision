@@ -43,6 +43,12 @@ def build_transforms(cfg: Config, train: bool) -> transforms.Compose:
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomRotation(degrees=20),
             transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.1),
+            # Blur augmentation: field photos are often soft/out-of-focus, so
+            # teach the model to tolerate it rather than shortcutting on
+            # lab-sharp images. Combined with the noise + brightness jitter
+            # below, this is the main defense (with label smoothing in
+            # train.py) against real-world quality variation and label noise.
+            transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))], p=0.3),
             transforms.ToTensor(),
             GaussianNoise(std=0.03),
             normalize,
