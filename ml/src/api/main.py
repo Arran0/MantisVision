@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import urllib.request
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -31,18 +32,6 @@ logging.basicConfig(level=logging.INFO)
 # server forever with no log output (which is exactly what a bare
 # urlretrieve() with no timeout does).
 CHECKPOINT_DOWNLOAD_TIMEOUT_S = 60
-
-app = FastAPI(title="Mantis Vision Inference API", version="0.1.0")
-
-# In production, set WEB_APP_ORIGIN to the deployed PWA's origin (e.g. your
-# Vercel URL) to stop other sites from calling this API from a browser.
-# Defaults to "*" for local development, where the caller is just localhost.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[os.environ.get("WEB_APP_ORIGIN", "*")],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 _predictor: Predictor | None = None
 
@@ -75,8 +64,8 @@ def get_predictor() -> Predictor:
     return _predictor
 
 
-@app.on_event("startup")
-def _load_model_on_startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     # ml/checkpoints/ is gitignored, so a fresh deploy (e.g. on Render or a
     # Hugging Face Space) won't have best_model.pt unless we fetch it. Set
     # MODEL_URL to a direct-download link (e.g. a GitHub Release asset) to
@@ -97,6 +86,20 @@ def _load_model_on_startup() -> None:
             logger.info("Model loaded successfully.")
     except Exception:
         logger.exception("Failed to download or load the model checkpoint.")
+    yield
+
+
+app = FastAPI(title="Mantis Vision Inference API", version="0.1.0", lifespan=lifespan)
+
+# In production, set WEB_APP_ORIGIN to the deployed PWA's origin (e.g. your
+# Vercel URL) to stop other sites from calling this API from a browser.
+# Defaults to "*" for local development, where the caller is just localhost.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.environ.get("WEB_APP_ORIGIN", "*")],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health", response_model=HealthCheckResponse)
