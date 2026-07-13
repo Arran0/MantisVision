@@ -8,12 +8,15 @@ recommendation).
 from __future__ import annotations
 
 EXPLANATIONS: dict[str, str] = {
-    "Healthy": "Bright green coloration with no whitening or broken branches detected.",
+    # Kappaphycus alvarezii is healthy at green, brown, or yellow-brown shades
+    # alike — the tell is vivid, even colour and intact branching, not any one
+    # specific hue.
+    "Healthy": "Vivid, even coloration with intact branching and no whitening, lesions, or breakage detected.",
     "Moderate": "Minor bleaching on branches and early tissue degradation observed.",
     "Low": "Significant discoloration and reduced branching compared to healthy tissue.",
-    "Decay": "Signs of tissue melting, brown patches, and rot are visible.",
-    "Dried": "Tissue is completely dried out/detached with no living tissue remaining.",
-    "Disease": "Lesions and infection symptoms consistent with a disease outbreak.",
+    "Decay": "Tissue melting with dark, mushy patches and a breakdown of branch structure, consistent with decay.",
+    "Dried": "Tissue is brittle, bleached, and fully desiccated, with no living tissue remaining.",
+    "Disease": "Discrete lesions or spotting consistent with a disease outbreak, distinct from generalized decay.",
 }
 
 RECOMMENDATIONS: dict[str, str] = {
