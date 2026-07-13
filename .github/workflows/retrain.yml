@@ -23,6 +23,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # New admin-labeled photos land on this branch (see
+      # apps/web/src/app/api/admin/dataset/route.ts), not in a database or
+      # bucket — Kaggle only supports syncing a whole folder as a dataset
+      # version, so the staged files need to be on disk for
+      # retrain_and_report.py to pick up. The branch won't exist yet if no
+      # admin has uploaded anything since the last retrain, so this is
+      # allowed to fail — the script treats a missing staging dir as "no new
+      # images this run," not an error.
+      - name: Checkout dataset-staging branch
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: dataset-staging
+          path: dataset-staging-checkout
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -40,4 +55,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          python scripts/retrain_and_report.py --model-run-id "${{ inputs.model_run_id }}"
+          python scripts/retrain_and_report.py \
+            --model-run-id "${{ inputs.model_run_id }}" \
+            --staging-dir "${{ github.workspace }}/dataset-staging-checkout/ml/dataset_incoming"

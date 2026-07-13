@@ -47,7 +47,9 @@ ml/
     build_label_map.py      # scan dataset -> metadata/label_map.csv (folder -> integer IDs)
     kaggle_sync.py           # push/pull the labeled dataset to/from a Kaggle Dataset
     export_model.py         # checkpoint -> multi-output ONNX for web/mobile deployment
-    retrain_and_report.py   # CI retraining orchestration (admin "Retrain" button)
+    retrain_and_report.py   # CI retraining orchestration (admin "Retrain" button): merges
+                             # admin uploads staged on the dataset-staging git branch into
+                             # dataset/, trains, then pushes the result to Kaggle
 ```
 
 ## Quick commands

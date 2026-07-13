@@ -15,6 +15,8 @@ export interface PredictionResult {
 }
 
 export interface TrainingImage {
+  // Relative path under the dataset-staging branch's ml/dataset_incoming/,
+  // e.g. "Kappaphycus_alvarezii_Healthy/<uuid>.jpg" — doubles as a unique id.
   id: string;
   createdAt: string;
   createdBy: string | null;
@@ -26,7 +28,6 @@ export interface TrainingImage {
   diseaseName: string | null;
   notes: string | null;
   farm: string | null;
-  status: string;
   thumbnailUrl: string | null;
 }
 

@@ -5,7 +5,7 @@ export function DatasetTable({ images, loading }: { images: TrainingImage[]; loa
     return <p className="text-sm text-slate-500">Loading…</p>;
   }
   if (images.length === 0) {
-    return <p className="text-sm text-slate-500">No labeled photos yet.</p>;
+    return <p className="text-sm text-slate-500">No labeled photos pending retraining.</p>;
   }
 
   return (
@@ -18,7 +18,6 @@ export function DatasetTable({ images, loading }: { images: TrainingImage[]; loa
             <th className="px-3 py-2">Condition</th>
             <th className="px-3 py-2">Detail</th>
             <th className="px-3 py-2">Farm</th>
-            <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2">Added</th>
           </tr>
         </thead>
@@ -44,7 +43,6 @@ export function DatasetTable({ images, loading }: { images: TrainingImage[]; loa
                   : "—"}
               </td>
               <td className="px-3 py-2 text-slate-600">{image.farm ?? "—"}</td>
-              <td className="px-3 py-2 text-slate-600">{image.status}</td>
               <td className="px-3 py-2 text-slate-500">
                 {new Date(image.createdAt).toLocaleDateString()}
               </td>

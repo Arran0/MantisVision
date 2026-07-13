@@ -21,3 +21,37 @@ export function isSeverity(value: string): value is Severity {
 export function isDiseaseSubtype(value: string): value is DiseaseSubtype {
   return (DISEASE_SUBTYPES as readonly string[]).includes(value);
 }
+
+// Kept in sync by hand with ml/config.py's SPECIES["slug"].
+export const SPECIES_SLUG = "Kappaphycus_alvarezii";
+
+// Decay/Dried only ever use "Low" severity — see ml/config.py's
+// FIXED_SEVERITY_CONDITIONS and ml/src/data/labels.py.
+const FIXED_SEVERITY: Partial<Record<Condition, Severity>> = { Decay: "Low", Dried: "Low" };
+
+// TypeScript mirror of ml/src/data/labels.py's build_class_folder — the admin
+// upload route uses this to name the staged file's folder on GitHub so the
+// retrain job can materialize it with zero translation.
+export function buildClassFolder(
+  condition: Condition,
+  severity?: Severity | null,
+  subtype?: DiseaseSubtype | null,
+  diseaseName?: string | null
+): string {
+  if (condition === "Background") return "Background";
+  if (condition === "Healthy") return `${SPECIES_SLUG}_Healthy`;
+
+  const fixedSeverity = FIXED_SEVERITY[condition];
+  if (fixedSeverity) return `${SPECIES_SLUG}_${fixedSeverity}_${condition}`;
+
+  if (condition === "Disease") {
+    if (!severity || !subtype) {
+      throw new Error("Disease requires both severity and subtype.");
+    }
+    const tokens = [SPECIES_SLUG, severity, "Disease", subtype];
+    if (diseaseName) tokens.push(diseaseName);
+    return tokens.join("_");
+  }
+
+  throw new Error(`Unknown condition ${condition}.`);
+}

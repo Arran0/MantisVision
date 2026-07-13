@@ -5,6 +5,24 @@ good as the consistency of its labels — apply these rules the same way every
 time, and when a photo is ambiguous, discard it or flag it for a second
 annotator rather than guessing.
 
+## Where the dataset actually lives
+
+The durable dataset store is a **Kaggle Dataset** (`ml/scripts/kaggle_sync.py`),
+not a database or bucket. Two ways photos get in:
+
+- **Bulk labeling**: label photos into the folder structure below directly
+  under `ml/dataset/<species_slug>/`, then `kaggle_sync.py push`.
+- **Admin panel** (`/admin/dataset`): uploading a photo there doesn't hit
+  Kaggle directly — Kaggle's API only supports syncing a whole folder as a
+  new dataset version, not a single real-time file insert from a web
+  request. Instead, the upload lands on a `dataset-staging` git branch
+  (`apps/web/src/lib/github.ts`), and the next "Retrain model" run
+  (`ml/scripts/retrain_and_report.py`) merges everything staged there into
+  the working dataset, trains on it, and pushes the merged result to Kaggle
+  as a new version before clearing the staging branch. So admin uploads are
+  visible in the `/admin/dataset` list immediately, but don't reach Kaggle
+  (or get trained on) until the next retrain run.
+
 ## Folder structure
 
 The dataset is organized under a single active species slug, with **flat,
