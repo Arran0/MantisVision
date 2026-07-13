@@ -21,10 +21,14 @@ ml/reports/
 
 # Dataset images live on Kaggle (see ml/scripts/kaggle_sync.py), not git —
 # keep the folder structure (.gitkeep files) but ignore actual photos.
-ml/dataset/train/*/*
-ml/dataset/validation/*/*
-ml/dataset/test/*/*
+# Layout is dataset/<species_slug>/{train,validation,test}/<class_folder>/*.
+ml/dataset/*/train/*/*
+ml/dataset/*/validation/*/*
+ml/dataset/*/test/*/*
 !ml/dataset/**/.gitkeep
+
+# label_map.csv is generated from the dataset by scripts/build_label_map.py.
+ml/metadata/label_map.csv
 # dataset-metadata.json itself (not the .example) is intentionally NOT
 # ignored — it's just the Kaggle dataset id/title, not a secret, and every
 # contributor needs the same one to push to the same Kaggle dataset.

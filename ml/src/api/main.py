@@ -21,7 +21,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from config import config  # noqa: E402
+from config import SPECIES, config  # noqa: E402
 from src.api.schemas import HealthCheckResponse, PredictionResponse  # noqa: E402
 from src.inference.predictor import Predictor  # noqa: E402
 
@@ -106,8 +106,22 @@ app.add_middleware(
 def health() -> HealthCheckResponse:
     checkpoint_path = config.checkpoints_dir / "best_model.pt"
     model_loaded = checkpoint_path.exists()
-    classes = config.class_names if not model_loaded else get_predictor().class_names
-    return HealthCheckResponse(status="ok", model_loaded=model_loaded, classes=classes)
+    if model_loaded:
+        predictor = get_predictor()
+        species = predictor.species_name
+        conditions = predictor.condition_classes
+        subtypes = predictor.subtype_classes
+    else:
+        species = SPECIES["name"]
+        conditions = list(config.condition_classes)
+        subtypes = list(config.disease_subtypes)
+    return HealthCheckResponse(
+        status="ok",
+        model_loaded=model_loaded,
+        species=species,
+        conditions=conditions,
+        disease_subtypes=subtypes,
+    )
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -121,8 +135,14 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
 
     return PredictionResponse(
         species=result.species,
+        is_seaweed=result.is_seaweed,
+        condition=result.condition,
         health=result.health,
+        health_score=result.health_score,
         confidence=result.confidence,
+        disease_subtype=result.disease_subtype,
+        dried_pct=result.dried_pct,
+        decayed_pct=result.decayed_pct,
         explanation=result.explanation,
         recommendation=result.recommendation,
         gradcam_png_base64=result.gradcam_base64_png,

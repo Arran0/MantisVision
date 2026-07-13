@@ -1,0 +1,43 @@
+name: Retrain model
+
+# Triggered from the admin panel (apps/web/src/app/api/admin/retrain/route.ts)
+# rather than running training on the always-on FastAPI serving container,
+# which would risk starving live /predict traffic for the duration of a
+# multi-epoch run. See ml/scripts/retrain_and_report.py for the full
+# orchestration and docs/DEPLOY_ML_API.md for how a promoted checkpoint gets
+# applied to the serving host afterwards.
+on:
+  workflow_dispatch:
+    inputs:
+      model_run_id:
+        description: "UUID of the model_runs row to update with progress/results"
+        required: true
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        working-directory: ml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run retraining
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_DATASET: ${{ vars.KAGGLE_DATASET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python scripts/retrain_and_report.py --model-run-id "${{ inputs.model_run_id }}"

@@ -1,3 +1,5 @@
-filename,label,species,gps,farm,date,camera,water_temperature_c,salinity_ppt,depth_m,time,annotator,notes
-healthy_001.jpg,Healthy,Kappaphycus alvarezii,,,,,,,,,,
-dried_001.jpg,Dried,Kappaphycus alvarezii,,,,,,,,,,
+filename,class_folder,condition,severity,subtype,disease_name,species,colour,health_score,dried_pct,decayed_pct,gps,farm,date,camera,water_temperature_c,salinity_ppt,depth_m,time,annotator,notes
+healthy_001.jpg,Kappaphycus_alvarezii_Healthy,Healthy,,,,Kappaphycus alvarezii,dark green,,,,,,,,,,,,,
+decay_001.jpg,Kappaphycus_alvarezii_Low_Decay,Decay,Low,,,Kappaphycus alvarezii,brown,,,,,,,,,,,,,
+disease_001.jpg,Kappaphycus_alvarezii_Moderate_Disease_IceIce,Disease,Moderate,IceIce,,Kappaphycus alvarezii,pale,,,,,,,,,,,,,
+background_001.jpg,Background,Background,,,,,,,,,,,,,,,,,,
