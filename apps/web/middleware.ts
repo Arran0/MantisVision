@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 
 // Coarse gate for everything under /admin and /api/admin: refreshes the
 // Supabase session cookie and rejects unauthenticated requests outright.
@@ -31,19 +31,21 @@ export async function middleware(request: NextRequest) {
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
-      get(name: string) {
-        return request.cookies.get(name)?.value;
+      getAll() {
+        return request.cookies.getAll();
       },
-      set(name: string, value: string, options: CookieOptions) {
-        request.cookies.set({ name, value, ...options });
+      // Called once with every cookie that needs writing (there are usually
+      // several — access + refresh token, sometimes split into chunks). The
+      // old set()-per-cookie API rebuilt `response` on every call, which
+      // discarded all but the last cookie and corrupted the session; setAll
+      // gets the full batch in one call so nothing is lost.
+      setAll: ((cookiesToSet) => {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request: { headers: request.headers } });
-        response.cookies.set({ name, value, ...options });
-      },
-      remove(name: string, options: CookieOptions) {
-        request.cookies.set({ name, value: "", ...options });
-        response = NextResponse.next({ request: { headers: request.headers } });
-        response.cookies.set({ name, value: "", ...options });
-      },
+        cookiesToSet.forEach(({ name, value, options }) =>
+          response.cookies.set(name, value, options)
+        );
+      }) satisfies SetAllCookies,
     },
   });
 

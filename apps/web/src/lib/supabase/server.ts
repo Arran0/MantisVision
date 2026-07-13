@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 
 // Server-side Supabase client bound to the request's cookies (anon key,
 // respects RLS). Use in Server Components and /api/admin/* route handlers to
@@ -13,24 +13,19 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return cookieStore.getAll();
         },
-        set(name: string, value: string, options: CookieOptions) {
+        setAll: ((cookiesToSet) => {
           try {
-            cookieStore.set({ name, value, ...options });
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
           } catch {
             // Called from a Server Component render — middleware.ts owns
             // refreshing the session cookie there, so this is safe to ignore.
           }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: "", ...options });
-          } catch {
-            // See note above.
-          }
-        },
+        }) satisfies SetAllCookies,
       },
     }
   );
