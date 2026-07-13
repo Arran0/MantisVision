@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { Background } from "@/components/Background";
@@ -51,6 +52,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="ml-auto hidden text-sm text-slate-400 sm:block">
               Google Lens for Seaweed
             </span>
+            <Link href="/admin/login" className="mv-btn-blue mv-btn-sm sm:ml-4">
+              Admin login
+            </Link>
           </div>
         </header>
 
