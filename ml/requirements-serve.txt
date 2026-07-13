@@ -5,12 +5,12 @@
 # Render free-tier build fast.
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-torch>=2.2
-torchvision>=0.17
-numpy>=1.26
-pillow>=10.2
-grad-cam>=1.5
-fastapi>=0.110
-uvicorn[standard]>=0.29
-python-multipart>=0.0.9
-pydantic>=2.6
+torch>=2.2,<3
+torchvision>=0.17,<1
+numpy>=1.26,<3
+pillow>=10.2,<13
+grad-cam>=1.5,<2
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+python-multipart>=0.0.9,<1
+pydantic>=2.6,<3

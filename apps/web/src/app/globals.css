@@ -121,6 +121,12 @@ body {
     @apply inline-flex h-9 w-9 items-center justify-center rounded-full border border-ocean-500/30 bg-ocean-500/20 text-ocean-700 backdrop-blur-md transition duration-200 hover:bg-ocean-500/35 active:scale-90;
   }
 
+  /* Compact variant for the 3-across action row: same jelly look, tighter
+     padding/font so Upload + Camera + Analyse fit one line on a phone. */
+  .mv-btn-sm {
+    @apply gap-1.5 px-2 py-2.5 text-xs sm:gap-2 sm:px-4 sm:text-sm;
+  }
+
   /* ---- Two-card stage ---------------------------------------------------
      Collapsed: one card wide/tall, explainer stacked behind the collector.
      Revealed (phone): explainer takes the top slot, collector slides down.

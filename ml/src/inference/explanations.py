@@ -8,10 +8,13 @@ from __future__ import annotations
 
 CONDITION_EXPLANATIONS: dict[str, str] = {
     "Background": "No seaweed specimen was detected in this image.",
-    "Healthy": "Bright green coloration with no whitening or broken branches detected.",
-    "Decay": "Signs of tissue melting, brown patches, and rot are visible.",
-    "Dried": "Tissue is largely dried out/detached with little living tissue remaining.",
-    "Disease": "Lesions and infection symptoms consistent with a disease outbreak.",
+    # Kappaphycus alvarezii is healthy at green, brown, or yellow-brown shades
+    # alike — the tell is vivid, even colour and intact branching, not any one
+    # specific hue.
+    "Healthy": "Vivid, even coloration with intact branching and no whitening, lesions, or breakage detected.",
+    "Decay": "Tissue melting with dark, mushy patches and a breakdown of branch structure, consistent with decay.",
+    "Dried": "Tissue is brittle, bleached, and fully desiccated, with no living tissue remaining.",
+    "Disease": "Discrete lesions or spotting consistent with a disease outbreak, distinct from generalized decay.",
 }
 
 CONDITION_RECOMMENDATIONS: dict[str, str] = {

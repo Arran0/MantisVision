@@ -224,30 +224,29 @@ export function UploadCard() {
               </button>
             </div>
           ) : (
-            <div className="flex flex-col gap-3">
-              <div className="flex gap-3">
-                <label className="mv-btn-orange flex-1 cursor-pointer">
-                  Upload photo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
-                </label>
-                <button type="button" onClick={openCamera} className="mv-btn-blue flex-1">
-                  Open camera
-                </button>
-              </div>
-
+            <div className="flex gap-2">
+              <label className="mv-btn-orange mv-btn-sm flex-1 cursor-pointer">
+                <UploadIcon />
+                <span>Upload</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </label>
+              <button type="button" onClick={openCamera} className="mv-btn-blue mv-btn-sm flex-1">
+                <CameraIcon />
+                <span>Camera</span>
+              </button>
               <button
                 type="button"
                 onClick={analyze}
                 disabled={!selection || loading}
-                className="mv-btn-blue w-full"
+                className="mv-btn-blue mv-btn-sm flex-1"
               >
-                {loading ? "Analysing…" : error ? "Try again" : "Analyse"}
+                {!loading && <AnalyseIcon />}
+                <span>{loading ? "Analysing…" : error ? "Try again" : "Analyse"}</span>
               </button>
             </div>
           )}
@@ -287,6 +286,50 @@ function CloseIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden>
       <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <path
+        d="M10 13V4M10 4l-3.5 3.5M10 4l3.5 3.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 13.5v1.25A1.25 1.25 0 0 0 5.25 16h9.5A1.25 1.25 0 0 0 16 14.75V13.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <path
+        d="M3 7.25A1.25 1.25 0 0 1 4.25 6h1.4l.72-1.2A1.25 1.25 0 0 1 7.44 4.2h5.12a1.25 1.25 0 0 1 1.07.6l.72 1.2h1.4A1.25 1.25 0 0 1 17 7.25v7.5A1.25 1.25 0 0 1 15.75 16H4.25A1.25 1.25 0 0 1 3 14.75Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="10" cy="10.5" r="2.6" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function AnalyseIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <circle cx="8.5" cy="8.5" r="5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M15.5 15.5 12.4 12.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
