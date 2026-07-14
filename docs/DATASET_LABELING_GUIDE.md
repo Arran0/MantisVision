@@ -5,62 +5,90 @@ good as the consistency of its labels — apply these rules the same way every
 time, and when a photo is ambiguous, discard it or flag it for a second
 annotator rather than guessing.
 
-## Folder structure
+## Column annotations, not class folders
 
-The dataset is organized under a single active species slug, with **flat,
-leaf class folders** inside each split (nested subfolders do NOT work with
-`torchvision.datasets.ImageFolder`):
+There is no folder-name taxonomy anymore (no
+`<slug>_<Severity>_<Condition>_<Subtype>` folders to parse). Every per-image
+label is a **column value** against the active **measurement schema**
+(admin-editable at `/admin/schema`, or `ml/config.py`'s `DEFAULT_SCHEMA` when
+no schema has been saved yet). A split directory looks like:
 
 ```
 ml/dataset/<species_slug>/
-  train/       <class_folder>/*.jpg
-  validation/  <class_folder>/*.jpg
-  test/        <class_folder>/*.jpg
+  train/       images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
+  validation/  images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
+  test/        images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
 ```
 
-Class-folder names encode structured labels (parsed in
-`ml/src/data/labels.py`). **Severity comes before the condition token**, so
-every non-Healthy, non-Background folder has the shape
-`<species_slug>_<Severity>_<Decay|Dried|Disease>...`:
+`annotations.jsonl` holds one JSON object per image:
 
-| Condition | Folder name |
-|---|---|
-| Healthy | `<species_slug>_Healthy` |
-| Decay | `<species_slug>_Low_Decay` |
-| Dried | `<species_slug>_Low_Dried` |
-| Disease | `<species_slug>_<Severity>_Disease_<Subtype>[_<DiseaseName>]` |
-| Background (no seaweed) | `Background` |
+```json
+{"filename": "0001.jpg",
+ "measurements": {"condition": "Healthy", "health_score": 82.4},
+ "masks": {"biofouling": "0001.png"}}
+```
 
-Example: `Kappaphycus_alvarezii_Moderate_Disease_IceIce`,
-`Kappaphycus_alvarezii_Low_Disease_Bacterial_Vibrio_sp`, `Background`.
+Each key in `measurements` is a measurement's `key` (auto-derived from its
+label in the admin editor — see below); the value is a class name string
+(classification) or a number (regression). `masks` maps a segmentation
+measurement's key to a mask filename under `masks/<key>/`. **Every
+measurement is optional per image** — one missing from a row simply
+contributes nothing to that head's loss for that image. This is how "no lab
+data for this measurement yet" and conditional measurements (e.g.
+`disease_subtype` only meaningful when `condition == "Disease"`) both work,
+for free, with no special-casing.
 
-- **Severity** ∈ `Moderate` (small/localized patch) or `Low` (widespread) —
-  but **Decay and Dried only ever use `Low`**. There is no
-  Moderate/Healthy-severity bucket for them: by definition a decayed or dried
-  specimen is already at the bottom of the health range, so only one bucket
-  each exists. Disease uses both `Moderate` and `Low`. Severity sets the
-  health-score training anchor; at inference the model re-derives Disease's
-  Moderate/Low from its regressed 0–100 score (Decay/Dried are always "Low").
-- **Subtype** (Disease only) ∈ `IceIce`, `Epiphyte`, `Bacterial`, `Bleaching`,
-  `Unknown`.
-- **DiseaseName** (Disease only) is a free-form trailing token (e.g. a
-  specific pathogen). It's parsed and recorded as **metadata only** — it is
-  not its own model head yet.
+In practice you label through the admin upload form
+(`/admin/dataset`), which renders one control per active measurement
+(dropdown for classification, number input for regression, mask upload for
+segmentation) and writes the resulting `measurements` map to Supabase; the
+retrain pipeline then materializes it into `annotations.jsonl` for training.
+Hand-editing the manifest directly is only for local experiments.
 
-The `Background` class is the N+1 negative class. Fill it with **diverse
-non-seaweed images**: empty underwater scenes, rocks, ropes, sand, other
-organisms, blurry/dark frames with no specimen. This is what teaches the
-model to say "no seaweed detected" instead of hallucinating a health
-assessment on an irrelevant photo.
+## The default measurement schema
 
-Swapping the active species is a one-line change (`SPECIES` in
-`ml/config.py`); the slug then prefixes every class folder.
+Out of the box (`DEFAULT_SCHEMA` in both `ml/config.py` and
+`apps/web/src/lib/schema.ts`) there are three measurements:
 
-Split ratio: **70% train / 15% validation / 15% test**. Use
-`ml/scripts/split_dataset.py` to split a flat labeled folder automatically
-with a fixed seed. Run `python scripts/build_label_map.py` afterward to
-(re)generate `ml/metadata/label_map.csv`, the human-auditable
-folder → integer-ID map the model trains on.
+| Measurement | Type | Values |
+|---|---|---|
+| `condition` | classification | `Background`, `Healthy`, `Disease`, `Decay`, `Dried` |
+| `disease_subtype` | classification, `applies_when condition == "Disease"` | `IceIce`, `Epiphyte`, `Bacterial`, `Bleaching`, `Unknown` |
+| `health_score` | regression, 0–100 | a continuous score |
+
+`condition` is the **primary classifier**: its `Background` class is the
+schema's designated "no subject" class (set once, schema-wide, in the admin
+editor's "Primary classifier" section — not a per-measurement toggle). Fill
+it with **diverse non-seaweed images**: empty underwater scenes, rocks,
+ropes, sand, other organisms, blurry/dark frames with no specimen. This is
+what teaches the model to say "no seaweed detected" instead of hallucinating
+a health assessment on an irrelevant photo.
+
+Severity (Moderate vs. Low) is **not a label you assign**. It's a display-only
+bucket derived at inference purely from the regressed `health_score` against
+two admin-editable thresholds (`health_moderate_min`, `health_healthy_min` —
+"Display thresholds" in the schema editor): at or above `health_healthy_min`
+→ "Healthy", at or above `health_moderate_min` → "Moderate", otherwise
+"Low". This applies uniformly to any non-background condition — there's no
+per-condition special case, so label a genuinely healthy-looking specimen
+with a high `health_score` and it will show "Healthy" regardless of which
+`condition` class it's under.
+
+Adding a new measurement (a lab value like moisture or gel strength, another
+segmentation target, a named-disease classifier) is an edit in `/admin/schema`,
+not a code change — the model, losses, dataset loader, and predictor all grow
+the new head generically from the schema. It stays masked (untrained, no
+effect on other heads) until images with real values for it exist.
+
+Swapping the active species is also a schema edit (the Species section);
+`active_species_slug` prefixes the dataset directory.
+
+Split ratio: **70% train / 15% validation / 15% test**, applied by the
+retrain pipeline (`ml/scripts/split_dataset.py`'s `split_class`) with a fixed
+seed for reproducibility. Run `python scripts/build_label_map.py` after
+pulling a dataset locally to generate `ml/metadata/label_map.csv`, a
+human-auditable "what does each image actually train on" audit trail (per
+schema measurement, per image).
 
 ## Label by content, not quality
 
@@ -72,46 +100,24 @@ all applied during training — see `ml/src/data/transforms.py`), not through a
 separate label. Only reject an image if you genuinely can't tell what it
 shows.
 
-## Multiple species / diseases later
-
-When expanding beyond one species or adding named diseases, keep the same
-flat-folder + label-map approach: add new class folders following the naming
-convention and re-run `build_label_map.py`. The CSV makes the
-folder → integer-ID mapping explicit and reviewable rather than implicit in
-code.
-
-## Minimum metadata
-
-Every image needs at minimum a filename and a `class_folder` (or the
-condition + Disease fields it's built from). Use
-`ml/metadata/labels_template.csv` as the starting spreadsheet. The optional
-numeric columns (`health_score`, `dried_pct`, `decayed_pct`) let you provide
-real ground truth for the regression heads; leave them blank to fall back to
-the per-condition heuristic anchors in `ml/config.py`. The remaining columns
-(`species`, `gps`, `farm`, `date`, `camera`, `water_temperature_c`,
-`salinity_ppt`, `depth_m`, `time`, `annotator`, `notes`) unlock
-per-farm/per-region analysis later.
-
 ## Condition definitions
 
 ### Healthy
 Bright coloration, no whitening, no broken branches.
 
 ### Decay
-Tissue melting, brown patches, rot. Always folder severity `Low` — no
-Moderate/Healthy variant.
+Tissue melting, brown patches, rot.
 
 ### Dried
 Largely dried out/bleached, detached from the line, little living tissue.
-Always folder severity `Low` — no Moderate/Healthy variant.
 
 ### Disease
 Visible lesions / infection symptoms not explained by grazing or general
-decay. Assign a **severity** (Moderate = localized, Low = widespread) and a
-**subtype**; add a specific disease name if known.
+decay. Assign a `disease_subtype`.
 
 ### Background
-No seaweed specimen in frame — the negative class (see above).
+No seaweed specimen in frame — the primary classifier's negative class (see
+above).
 
 ## Addressing label noise
 
@@ -121,16 +127,16 @@ threat to model quality. Defenses, in order:
 1. **Clear, unambiguous rules.** Use the definitions above the same way every
    time. When two conditions are plausible, discard or flag for a second
    annotator — don't guess.
-2. **Two-annotator agreement for ambiguous cases** (e.g. Decay vs. Dried,
-   Moderate vs. Low). Resolve disagreements by discussion, not silent
-   averaging.
+2. **Two-annotator agreement for ambiguous cases** (e.g. Decay vs. Dried, or
+   a borderline `health_score`). Resolve disagreements by discussion, not
+   silent averaging.
 3. **Augmentation** simulates real-world quality variation so the model
    doesn't overfit to pristine lab photos (already wired into training).
-4. **Label smoothing** on the condition head softens the impact of a wrong
-   label (already enabled in `ml/src/train.py`). For heavier noise, the
-   condition criterion can be swapped for a Generalized Cross-Entropy /
-   symmetric loss in `ml/src/losses.py` — the rest of the pipeline is
-   unaffected.
+4. **Label smoothing** on classification heads softens the impact of a wrong
+   label (already enabled in `ml/src/train.py`). For heavier noise, a
+   criterion can be swapped for a Generalized Cross-Entropy / symmetric loss
+   in `ml/src/losses.py` — the rest of the pipeline is unaffected.
 5. **Don't relabel to fix class imbalance.** If a class is underrepresented,
    collect more of it. `python -m src.data.validate_dataset` reports
-   per-condition counts and flags underrepresented conditions.
+   per-measurement counts and flags underrepresented classes on the primary
+   classification.

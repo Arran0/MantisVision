@@ -1,57 +1,53 @@
 import type { TrainingImage } from "@/lib/types";
+import { AdminCard } from "@/components/admin/ui";
 
 export function DatasetTable({ images, loading }: { images: TrainingImage[]; loading: boolean }) {
   if (loading) {
-    return <p className="text-sm text-slate-500">Loading…</p>;
+    return <p className="text-sm text-zinc-500">Loading…</p>;
   }
   if (images.length === 0) {
-    return <p className="text-sm text-slate-500">No labeled photos yet.</p>;
+    return <p className="text-sm text-zinc-500">No labeled photos yet.</p>;
   }
 
   return (
-    <div className="mv-card overflow-x-auto p-4">
-      <table className="w-full min-w-[640px] border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
-            <th className="px-3 py-2">Photo</th>
-            <th className="px-3 py-2">Species</th>
-            <th className="px-3 py-2">Measurements</th>
-            <th className="px-3 py-2">Farm</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Added</th>
-          </tr>
-        </thead>
-        <tbody>
-          {images.map((image) => (
-            <tr key={image.id} className="border-b border-slate-100 last:border-0">
-              <td className="px-3 py-2">
-                {image.thumbnailUrl ? (
-                  <img
-                    src={image.thumbnailUrl}
-                    alt=""
-                    className="h-12 w-12 rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="h-12 w-12 rounded-lg bg-slate-100" />
-                )}
-              </td>
-              <td className="px-3 py-2 italic text-slate-800">{image.species ?? "—"}</td>
-              <td className="px-3 py-2 text-slate-600">
-                {Object.keys(image.measurements).length === 0
-                  ? "—"
-                  : Object.entries(image.measurements)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(" · ")}
-              </td>
-              <td className="px-3 py-2 text-slate-600">{image.farm ?? "—"}</td>
-              <td className="px-3 py-2 text-slate-600">{image.status}</td>
-              <td className="px-3 py-2 text-slate-500">
-                {new Date(image.createdAt).toLocaleDateString()}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <AdminCard className="overflow-hidden">
+      <div className="flex bg-zinc-900 px-4 py-2.5">
+        <span className="w-14 flex-shrink-0" />
+        <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Species</span>
+        <span className="hidden flex-[2] text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
+          Measurements
+        </span>
+        <span className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Status</span>
+        <span className="hidden w-28 flex-shrink-0 text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
+          Added
+        </span>
+      </div>
+      <div className="max-h-[32rem] overflow-y-auto">
+        {images.map((image) => (
+          <div key={image.id} className="flex items-center gap-0 border-b border-zinc-100 px-4 py-2.5 last:border-0 hover:bg-zinc-50">
+            <div className="w-14 flex-shrink-0">
+              {image.thumbnailUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={image.thumbnailUrl} alt="" className="h-10 w-10 rounded-lg object-cover" />
+              ) : (
+                <div className="h-10 w-10 rounded-lg bg-zinc-100" />
+              )}
+            </div>
+            <span className="flex-1 truncate text-sm italic text-zinc-800">{image.species ?? "—"}</span>
+            <span className="hidden flex-[2] truncate text-xs text-zinc-600 sm:block">
+              {Object.keys(image.measurements).length === 0
+                ? "—"
+                : Object.entries(image.measurements)
+                    .map(([key, value]) => `${key}: ${value}`)
+                    .join(" · ")}
+            </span>
+            <span className="w-24 flex-shrink-0 text-xs text-zinc-600">{image.status}</span>
+            <span className="hidden w-28 flex-shrink-0 text-right text-xs text-zinc-400 sm:block">
+              {new Date(image.createdAt).toLocaleDateString()}
+            </span>
+          </div>
+        ))}
+      </div>
+    </AdminCard>
   );
 }

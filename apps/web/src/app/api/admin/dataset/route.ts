@@ -23,12 +23,6 @@ function extensionFor(file: File): string {
   return fromType && fromType.length <= 5 ? fromType.toLowerCase() : "jpg";
 }
 
-function numberOrNull(value: FormDataEntryValue | null): number | null {
-  if (typeof value !== "string" || value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function stringOrNull(value: FormDataEntryValue | null): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
@@ -129,9 +123,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 502 });
   }
 
-  const gpsLat = numberOrNull(formData.get("gpsLat"));
-  const gpsLng = numberOrNull(formData.get("gpsLng"));
-
   // Legacy flat columns are populated opportunistically from the well-known
   // measurement keys (for existing queries/back-compat); they're no longer
   // the source of truth for training — `measurements` is.
@@ -150,13 +141,6 @@ export async function POST(request: NextRequest) {
       species,
       colour: isBackground ? null : stringOrNull(formData.get("colour")),
       notes: stringOrNull(formData.get("notes")),
-      farm: stringOrNull(formData.get("farm")),
-      camera: stringOrNull(formData.get("camera")),
-      captured_at: stringOrNull(formData.get("capturedAt")),
-      water_temperature_c: numberOrNull(formData.get("waterTemperatureC")),
-      salinity_ppt: numberOrNull(formData.get("salinityPpt")),
-      depth_m: numberOrNull(formData.get("depthM")),
-      gps: gpsLat !== null && gpsLng !== null ? `(${gpsLng},${gpsLat})` : null,
     })
     .select()
     .single();
@@ -184,7 +168,7 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
   const { data: rows, error } = await admin
     .from("training_images")
-    .select("id, created_at, created_by, species, colour, measurements, notes, farm, status, storage_path")
+    .select("id, created_at, created_by, species, colour, measurements, notes, status, storage_path")
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -205,7 +189,6 @@ export async function GET(request: NextRequest) {
         colour: row.colour,
         measurements: (row.measurements as Record<string, string | number>) ?? {},
         notes: row.notes,
-        farm: row.farm,
         status: row.status,
         thumbnailUrl: signed?.signedUrl ?? null,
       };

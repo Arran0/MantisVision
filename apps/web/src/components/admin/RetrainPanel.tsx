@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { ModelRun } from "@/lib/types";
+import { AdminBadge, AdminButton, AdminCard, sectionHeadingClass } from "@/components/admin/ui";
 
 const POLL_MS = 5_000;
 
@@ -75,68 +77,59 @@ export function RetrainPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="mv-card flex flex-col gap-3 p-6">
-        <h2 className="text-lg font-semibold text-slate-900">Retrain model</h2>
-        <p className="text-sm text-slate-600">
-          Runs training on every currently labeled photo in the dataset, then reports evaluation
-          metrics here. Nothing goes live until you explicitly promote a completed run.
+    <div className="flex flex-col gap-5">
+      <AdminCard className="flex flex-col gap-3 p-5">
+        <h2 className={sectionHeadingClass}>Retrain model</h2>
+        <p className="text-sm text-zinc-600">
+          Runs training on every currently labeled photo in the dataset, then reports evaluation metrics here.
+          Nothing goes live until you explicitly promote a completed run.
         </p>
-        <button type="button" onClick={trigger} disabled={triggering} className="mv-btn-blue self-start">
+        <AdminButton type="button" onClick={trigger} disabled={triggering} className="self-start">
           {triggering ? "Starting…" : "Retrain model"}
-        </button>
-        {message && <p className="whitespace-pre-wrap text-sm text-slate-700">{message}</p>}
-      </div>
+        </AdminButton>
+        {message && <p className="whitespace-pre-wrap text-sm text-zinc-700">{message}</p>}
+      </AdminCard>
 
       <div className="flex flex-col gap-3">
-        {runs.length === 0 && <p className="text-sm text-slate-500">No retraining runs yet.</p>}
-        {runs.map((run) => (
-          <div key={run.id} className="mv-card flex flex-col gap-2 p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-800">
-                {new Date(run.createdAt).toLocaleString()}
-              </span>
-              <StatusBadge status={run.status} />
-            </div>
-            {run.datasetImageCount !== null && (
-              <p className="text-sm text-slate-600">{run.datasetImageCount} images used</p>
-            )}
-            {run.metrics && (
-              <pre className="max-h-48 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-                {JSON.stringify(run.metrics, null, 2)}
-              </pre>
-            )}
-            {run.error && <p className="text-sm text-coral-600">{run.error}</p>}
-            {run.status === "completed" && !run.promotedAt && (
-              <button
-                type="button"
-                onClick={() => promote(run.id)}
-                disabled={promotingId === run.id}
-                className="mv-btn-orange self-start"
-              >
-                {promotingId === run.id ? "Promoting…" : "Promote to production"}
-              </button>
-            )}
-            {run.promotedAt && (
-              <p className="text-sm text-seaweed-600">
-                Promoted {new Date(run.promotedAt).toLocaleString()}
-              </p>
-            )}
-          </div>
-        ))}
+        {runs.length === 0 && <p className="text-sm text-zinc-500">No retraining runs yet.</p>}
+        <AnimatePresence initial={false}>
+          {runs.map((run) => (
+            <motion.div key={run.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+              <AdminCard className="flex flex-col gap-2 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-zinc-800">{new Date(run.createdAt).toLocaleString()}</span>
+                  <StatusBadge status={run.status} />
+                </div>
+                {run.datasetImageCount !== null && <p className="text-sm text-zinc-600">{run.datasetImageCount} images used</p>}
+                {run.metrics && (
+                  <pre className="max-h-48 overflow-auto rounded-lg bg-zinc-50 p-3 text-xs text-zinc-700">
+                    {JSON.stringify(run.metrics, null, 2)}
+                  </pre>
+                )}
+                {run.error && <p className="text-sm text-rose-600">{run.error}</p>}
+                {run.status === "completed" && !run.promotedAt && (
+                  <AdminButton type="button" onClick={() => promote(run.id)} disabled={promotingId === run.id} className="self-start">
+                    {promotingId === run.id ? "Promoting…" : "Promote to production"}
+                  </AdminButton>
+                )}
+                {run.promotedAt && (
+                  <p className="text-sm text-seaweed-600">Promoted {new Date(run.promotedAt).toLocaleString()}</p>
+                )}
+              </AdminCard>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: ModelRun["status"] }) {
-  const styles: Record<ModelRun["status"], string> = {
-    queued: "bg-slate-100 text-slate-700",
-    running: "bg-ocean-100 text-ocean-700",
-    completed: "bg-seaweed-100 text-seaweed-700",
-    failed: "bg-coral-500/15 text-coral-600",
+  const tones: Record<ModelRun["status"], "zinc" | "ocean" | "seaweed" | "rose"> = {
+    queued: "zinc",
+    running: "ocean",
+    completed: "seaweed",
+    failed: "rose",
   };
-  return (
-    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${styles[status]}`}>{status}</span>
-  );
+  return <AdminBadge tone={tones[status]}>{status}</AdminBadge>;
 }

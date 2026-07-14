@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { TrainingImage } from "@/lib/types";
 import { DatasetUploadForm } from "@/components/admin/DatasetUploadForm";
 import { DatasetTable } from "@/components/admin/DatasetTable";
+import { AdminPageHeader } from "@/components/admin/ui";
 
 export default function DatasetPage() {
   const [images, setImages] = useState<TrainingImage[]>([]);
@@ -25,13 +26,8 @@ export default function DatasetPage() {
   }, [refresh]);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dataset</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Photos labeled here feed the training dataset used by a retrain run.
-        </p>
-      </div>
+    <div className="flex flex-col gap-5">
+      <AdminPageHeader title="Dataset" subtitle="Photos labeled here feed the training dataset used by a retrain run." />
       <DatasetUploadForm onUploaded={refresh} />
       <DatasetTable images={images} loading={loading} />
     </div>

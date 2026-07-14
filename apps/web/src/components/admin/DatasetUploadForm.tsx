@@ -7,9 +7,7 @@ import {
   measurementApplies,
   type SchemaDoc,
 } from "@/lib/schema";
-
-const INPUT = "rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900";
-const LABEL = "flex flex-col gap-1 text-sm font-medium text-slate-700";
+import { AdminButton, AdminCard, AdminField, AdminInput, AdminSelect, AdminTextarea, sectionHeadingClass } from "@/components/admin/ui";
 
 export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   // Starts from the built-in defaults and swaps to the live, admin-edited
@@ -29,16 +27,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
 
   const [colour, setColour] = useState("");
   const [notes, setNotes] = useState("");
-
-  const [showMore, setShowMore] = useState(false);
-  const [farm, setFarm] = useState("");
-  const [camera, setCamera] = useState("");
-  const [capturedAt, setCapturedAt] = useState("");
-  const [waterTemperatureC, setWaterTemperatureC] = useState("");
-  const [salinityPpt, setSalinityPpt] = useState("");
-  const [depthM, setDepthM] = useState("");
-  const [gpsLat, setGpsLat] = useState("");
-  const [gpsLng, setGpsLng] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,14 +67,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     setNotes("");
     setNumberValues({});
     setMaskFiles({});
-    setFarm("");
-    setCamera("");
-    setCapturedAt("");
-    setWaterTemperatureC("");
-    setSalinityPpt("");
-    setDepthM("");
-    setGpsLat("");
-    setGpsLng("");
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -127,14 +107,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
       formData.append("colour", colour);
     }
     formData.append("notes", notes);
-    formData.append("farm", farm);
-    formData.append("camera", camera);
-    formData.append("capturedAt", capturedAt);
-    formData.append("waterTemperatureC", waterTemperatureC);
-    formData.append("salinityPpt", salinityPpt);
-    formData.append("depthM", depthM);
-    formData.append("gpsLat", gpsLat);
-    formData.append("gpsLng", gpsLng);
 
     try {
       const response = await fetch("/api/admin/dataset", { method: "POST", body: formData });
@@ -152,208 +124,98 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mv-card flex flex-col gap-4 p-6">
-      <h2 className="text-lg font-semibold text-slate-900">Label a new photo</h2>
+    <AdminCard className="p-5">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <h2 className={sectionHeadingClass}>Label a new photo</h2>
 
-      <label className={LABEL}>
-        Photo
-        <input
-          type="file"
-          accept="image/*"
-          required
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          className="text-sm"
-        />
-      </label>
+        <AdminField label="Photo">
+          <input
+            type="file"
+            accept="image/*"
+            required
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            className="block text-sm text-zinc-700"
+          />
+        </AdminField>
 
-      {/* One control per schema measurement, in schema order. A measurement
-          with an applies_when that isn't satisfied by the current selections
-          (e.g. disease_subtype when condition != Disease) is hidden. */}
-      {schema.measurements.map((m) => {
-        if (!measurementApplies(m, classValues)) return null;
+        {/* One control per schema measurement, in schema order. A measurement
+            with an applies_when that isn't satisfied by the current selections
+            (e.g. disease_subtype when condition != Disease) is hidden. */}
+        {schema.measurements.map((m) => {
+          if (!measurementApplies(m, classValues)) return null;
 
-        if (m.type === "classification") {
+          if (m.type === "classification") {
+            return (
+              <AdminField key={m.key} label={m.label}>
+                <AdminSelect
+                  required
+                  value={classValues[m.key] ?? ""}
+                  onChange={(event) => setClassValues((prev) => ({ ...prev, [m.key]: event.target.value }))}
+                >
+                  {(m.classes ?? []).map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {m.background_class === c.name ? `${c.name} (no subject)` : c.name}
+                    </option>
+                  ))}
+                </AdminSelect>
+              </AdminField>
+            );
+          }
+
+          if (m.type === "regression") {
+            return (
+              <AdminField key={m.key} label={`${m.label} (${m.min ?? 0}–${m.max ?? 100}${m.unit ? ` ${m.unit}` : ""}, optional)`}>
+                <AdminInput
+                  type="number"
+                  min={m.min ?? 0}
+                  max={m.max ?? 100}
+                  value={numberValues[m.key] ?? ""}
+                  onChange={(event) => setNumberValues((prev) => ({ ...prev, [m.key]: event.target.value }))}
+                  placeholder="anchor if blank"
+                />
+              </AdminField>
+            );
+          }
+
+          // segmentation
           return (
-            <label key={m.key} className={LABEL}>
-              {m.label}
-              <select
-                required
-                value={classValues[m.key] ?? ""}
-                onChange={(event) => setClassValues((prev) => ({ ...prev, [m.key]: event.target.value }))}
-                className={INPUT}
-              >
-                {(m.classes ?? []).map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {m.background_class === c.name ? `${c.name} (no subject)` : c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          );
-        }
-
-        if (m.type === "regression") {
-          return (
-            <label key={m.key} className="flex flex-col gap-1 text-sm text-slate-700">
-              {m.label} ({m.min ?? 0}–{m.max ?? 100}{m.unit ? ` ${m.unit}` : ""}, optional)
+            <AdminField key={m.key} label={`${m.label} mask (optional)`}>
               <input
-                type="number"
-                min={m.min ?? 0}
-                max={m.max ?? 100}
-                value={numberValues[m.key] ?? ""}
-                onChange={(event) => setNumberValues((prev) => ({ ...prev, [m.key]: event.target.value }))}
-                placeholder="anchor if blank"
-                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
+                type="file"
+                accept="image/*"
+                onChange={(event) => setMaskFiles((prev) => ({ ...prev, [m.key]: event.target.files?.[0] ?? null }))}
+                className="block text-sm text-zinc-700"
               />
-            </label>
+            </AdminField>
           );
-        }
+        })}
 
-        // segmentation
-        return (
-          <label key={m.key} className="flex flex-col gap-1 text-sm text-slate-700">
-            {m.label} mask (optional)
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) =>
-                setMaskFiles((prev) => ({ ...prev, [m.key]: event.target.files?.[0] ?? null }))
-              }
-              className="text-sm"
-            />
-          </label>
-        );
-      })}
+        {!isBackground && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <AdminField label="Species">
+              <AdminInput type="text" value={species} onChange={(event) => setSpecies(event.target.value)} />
+            </AdminField>
+            <AdminField label="Colour">
+              <AdminInput
+                type="text"
+                value={colour}
+                onChange={(event) => setColour(event.target.value)}
+                placeholder="e.g. dark green"
+              />
+            </AdminField>
+          </div>
+        )}
 
-      {!isBackground && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className={LABEL}>
-            Species
-            <input
-              type="text"
-              value={species}
-              onChange={(event) => setSpecies(event.target.value)}
-              className={INPUT}
-            />
-          </label>
-          <label className={LABEL}>
-            Colour
-            <input
-              type="text"
-              value={colour}
-              onChange={(event) => setColour(event.target.value)}
-              placeholder="e.g. dark green"
-              className={INPUT}
-            />
-          </label>
-        </div>
-      )}
+        <AdminField label="Notes">
+          <AdminTextarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
+        </AdminField>
 
-      <label className={LABEL}>
-        Notes
-        <textarea
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          rows={2}
-          className={INPUT}
-        />
-      </label>
+        {error && <p className="text-sm text-rose-600">{error}</p>}
 
-      <button
-        type="button"
-        onClick={() => setShowMore((prev) => !prev)}
-        className="self-start text-sm font-semibold text-ocean-700"
-      >
-        {showMore ? "Hide" : "Show"} more metadata
-      </button>
-
-      {showMore && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Farm
-            <input
-              type="text"
-              value={farm}
-              onChange={(event) => setFarm(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Camera
-            <input
-              type="text"
-              value={camera}
-              onChange={(event) => setCamera(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Captured at
-            <input
-              type="datetime-local"
-              value={capturedAt}
-              onChange={(event) => setCapturedAt(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            GPS latitude
-            <input
-              type="number"
-              step="any"
-              value={gpsLat}
-              onChange={(event) => setGpsLat(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            GPS longitude
-            <input
-              type="number"
-              step="any"
-              value={gpsLng}
-              onChange={(event) => setGpsLng(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Water temp (°C)
-            <input
-              type="number"
-              step="any"
-              value={waterTemperatureC}
-              onChange={(event) => setWaterTemperatureC(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Salinity (ppt)
-            <input
-              type="number"
-              step="any"
-              value={salinityPpt}
-              onChange={(event) => setSalinityPpt(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Depth (m)
-            <input
-              type="number"
-              step="any"
-              value={depthM}
-              onChange={(event) => setDepthM(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-            />
-          </label>
-        </div>
-      )}
-
-      {error && <p className="text-sm text-coral-600">{error}</p>}
-
-      <button type="submit" disabled={submitting} className="mv-btn-blue self-start">
-        {submitting ? "Uploading…" : "Add to dataset"}
-      </button>
-    </form>
+        <AdminButton type="submit" disabled={submitting} className="self-start">
+          {submitting ? "Uploading…" : "Add to dataset"}
+        </AdminButton>
+      </form>
+    </AdminCard>
   );
 }

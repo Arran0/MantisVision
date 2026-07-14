@@ -28,20 +28,24 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (profile?.role !== "admin") {
     return (
-      <main className="mx-auto flex max-w-lg flex-col items-center gap-3 px-5 py-24 text-center">
-        <h1 className="text-xl font-bold text-slate-900">Not authorized</h1>
-        <p className="text-sm text-slate-600">
-          Your account ({user.email}) doesn&rsquo;t have admin access. Ask an existing admin to
-          promote your account.
-        </p>
-      </main>
+      <div className="min-h-screen bg-zinc-50">
+        <main className="mx-auto flex max-w-lg flex-col items-center gap-3 px-5 py-24 text-center">
+          <h1 className="text-xl font-bold text-zinc-900">Not authorized</h1>
+          <p className="text-sm text-zinc-600">
+            Your account ({user.email}) doesn&rsquo;t have admin access. Ask an existing admin to
+            promote your account.
+          </p>
+        </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 px-5 py-10 sm:px-8">
-      <AdminNav email={user.email ?? null} />
-      {children}
-    </main>
+    <div className="min-h-screen bg-zinc-50">
+      <main className="mx-auto flex max-w-5xl flex-col gap-5 px-5 py-8 sm:px-8">
+        <AdminNav email={user.email ?? null} />
+        {children}
+      </main>
+    </div>
   );
 }

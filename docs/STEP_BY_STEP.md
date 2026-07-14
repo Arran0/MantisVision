@@ -37,7 +37,9 @@ Already done in this repo:
 
 - [x] Repository structure (`apps/web`, `ml`, `docs`)
 - [x] Python environment defined (`ml/requirements.txt`)
-- [x] Dataset folder structure (`ml/dataset/{train,validation,test}/<7 classes>`)
+- [x] Dataset split structure (`ml/dataset/<species_slug>/{train,validation,test}/`,
+      each holding `images/`, `masks/<measurement_key>/`, and an
+      `annotations.jsonl` manifest — see Milestone 2)
 - [x] Logging (`ml/src/utils/logger.py`)
 - [x] Reproducibility via fixed seeds (`ml/src/utils/seed.py`, `config.py: seed=42`)
 
@@ -59,12 +61,24 @@ pip install -r requirements.txt
 Read [`docs/DATASET_LABELING_GUIDE.md`](./DATASET_LABELING_GUIDE.md) before
 labeling anything. Consistent labels matter more than volume.
 
-### 2.2 The dataset lives on Kaggle, not in git
+### 2.2 Labeling happens through the admin panel, not raw folders
 
-Photo datasets grow large fast and don't belong in git history. Instead, the
-labeled dataset is a **Kaggle Dataset**, synced with
-`ml/scripts/kaggle_sync.py`. `.gitignore` already excludes the actual image
-files under `ml/dataset/{train,validation,test}/<Class>/` — only the folder
+Per-image ground truth is **column annotations against the active
+measurement schema** (admin-editable at `/admin/schema`), not folder names —
+see `docs/DATASET_LABELING_GUIDE.md` for the schema shape and labeling rules.
+In practice you label by uploading photos through `/admin/dataset`, which
+renders one control per active measurement (dropdown, number input, or mask
+upload) and writes the result to Supabase; the "Retrain" button then
+materializes everything into the manifest format below and trains on it —
+you don't usually touch `ml/dataset/` by hand.
+
+### 2.3 The dataset lives on Kaggle, not in git
+
+Photo datasets grow large fast and don't belong in git history. The
+retraining pipeline can additionally layer an archived **Kaggle Dataset** in
+underneath the admin-labeled images, synced with `ml/scripts/kaggle_sync.py`.
+`.gitignore` already excludes the actual dataset contents under
+`ml/dataset/<species_slug>/{train,validation,test}/` — only the directory
 structure (`.gitkeep`) is committed.
 
 **One-time setup:**
@@ -80,27 +94,20 @@ structure (`.gitkeep`) is committed.
    `~/.kaggle/kaggle.json` with `chmod 600` — either method works.)
 3. `pip install -r requirements.txt` (already includes the `kaggle` package).
 
-**Label photos locally, then get them into `ml/dataset/`:**
+A split directory that `kaggle_sync.py` pushes/pulls looks like:
 
-- **You have a flat folder of labeled photos** (`raw/Healthy/*.jpg`,
-  `raw/Dried/*.jpg`, etc.):
+```
+ml/dataset/<species_slug>/
+  train/       images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
+  validation/  images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
+  test/        images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
+```
 
-  ```bash
-  cd ml
-  python scripts/split_dataset.py --source /path/to/raw
-  ```
-
-  Copies files into `dataset/{train,validation,test}/<Class>/` using a
-  fixed-seed 70/15/15 split (reproducible — re-running with the same source
-  files and seed gives the same split every time).
-
-- **You're adding photos incrementally.** Drop them directly into
-  `ml/dataset/train/<ClassName>/`, `validation/<ClassName>/`, and
-  `test/<ClassName>/` yourself, keeping roughly a 70/15/15 ratio per class.
-
-Class folder names (must match exactly): `Healthy`, `Moderate`, `Low`,
-`Decay`, `Dried`, `Disease` (6 classes for now — `Predator` was dropped until
-real grazing photos are available; see `docs/DATASET_LABELING_GUIDE.md`).
+`ml/scripts/split_dataset.py` exposes the generic fixed-seed 70/15/15
+splitter (`split_class`) that the retrain orchestration
+(`retrain_and_report.py`) uses when assembling a fresh split from Supabase
+rows — it's a library function now, not a standalone CLI for importing raw
+folders.
 
 **Push the dataset to Kaggle** (first time creates it, every time after that
 pushes a new version — Kaggle keeps the version history for you):
@@ -138,17 +145,19 @@ Kaggle (`scripts/kaggle_sync.py`) is still there as an alternative once the
 dataset grows large enough that re-uploading a zip every Colab session gets
 tedious — it's not required for the notebook above.
 
-### 2.3 Validate the dataset
+### 2.4 Validate the dataset
 
 ```bash
 python -m src.data.validate_dataset
 ```
 
-This checks every class folder exists, every image opens correctly (catches
-corrupt files before they crash training), and flags classes that are
-severely underrepresented relative to the largest class.
+This checks every image referenced in each split's `annotations.jsonl`
+manifest opens correctly (catches corrupt files before they crash training),
+confirms the primary classification's background class is represented in
+every split, and flags classes that are severely underrepresented relative
+to the largest class.
 
-### 2.4 What the pipeline does under the hood
+### 2.5 What the pipeline does under the hood
 
 `src/data/transforms.py` + `src/data/dataset.py` implement:
 
@@ -168,12 +177,15 @@ Already implemented in `ml/src/models/efficientnet.py`:
 
 - Transfer learning from `EfficientNet-B0` pretrained on ImageNet (per spec:
   best accuracy/size tradeoff for the first model — not trained from
-  scratch).
-- `build_model(num_classes, freeze_backbone=True)` freezes the pretrained
-  backbone and swaps in a fresh classifier head sized for the 7 health
-  classes.
-- `unfreeze_backbone()` is called after the head has stabilized, to fine-tune
-  the whole network.
+  scratch), a single shared backbone for every measurement.
+- `build_model(schema, freeze_backbone=True)` freezes the pretrained backbone
+  and grows one fresh head per measurement in the active `Schema`:
+  classification (n-way logits), regression (a sigmoid-squashed scalar), or
+  segmentation (a lightweight upsampling decoder off the backbone's feature
+  map). Adding a measurement in the schema editor means a new head appears
+  automatically next training run — no change to this file.
+- `unfreeze_backbone()` is called after the heads have stabilized, to
+  fine-tune the whole network.
 
 To try a different backbone later (`EfficientNetV2-S`, `ConvNeXt-Tiny`,
 `MobileNetV3`), that's the only file to change — the training loop doesn't
@@ -198,11 +210,13 @@ This runs the two-phase schedule from `config.py`:
    whole network trains at a lower learning rate.
 
 Early stopping (`early_stopping_patience`, default 6 epochs with no
-improvement) applies independently within each phase. The best checkpoint
-(lowest validation loss) is saved to `ml/checkpoints/best_model.pt`, along
-with the exact class-index order the model was trained with — always decode
-predictions using that saved order, not `config.CLASS_NAMES`' display order
-(see the comment in `src/data/dataset.py` for why).
+improvement) applies independently within each phase, per measurement. The
+best checkpoint (lowest validation loss) is saved to
+`ml/checkpoints/best_model.pt` with the **schema it was trained against
+baked in** — so a checkpoint is always decoded using its own saved schema's
+class order and thresholds, not whatever schema happens to be active later.
+This is also what makes hot-swapping a promoted checkpoint safe: promoting a
+run atomically swaps both the weights and the head/class configuration.
 
 Logs go to `ml/logs/train.log` as well as the console.
 
@@ -212,12 +226,17 @@ Logs go to `ml/logs/train.log` as well as the console.
 python -m src.evaluate
 ```
 
-Produces, per the spec's "don't rely only on accuracy" requirement:
+Produces, per measurement, per the spec's "don't rely only on accuracy"
+requirement:
 
-- Accuracy, macro/weighted precision, recall, F1
-- Per-class accuracy, precision, recall, F1
-- Confusion matrix image → `ml/reports/confusion_matrix.png`
-- One-vs-rest ROC AUC per class (when the test split has enough samples)
+- **Classification** (primary classification only, for the confusion
+  matrix): accuracy, macro/weighted precision, recall, F1, per-class
+  breakdown, confusion matrix image → `ml/reports/confusion_matrix.png`,
+  one-vs-rest ROC AUC per class (when the test split has enough samples)
+- **Regression**: mean absolute error on the samples where a ground-truth
+  value exists
+- **Segmentation**: mean IoU per mask class, on samples with a ground-truth
+  mask
 - Full results JSON → `ml/reports/evaluation_results.json`
 
 Use the per-class breakdown to see which classes need more data — e.g. if
@@ -253,21 +272,41 @@ uvicorn src.api.main:app --reload --port 8000
 
 Endpoints:
 
-- `GET /health` → `{status, model_loaded, classes}`
-- `POST /predict` → multipart form with a `file` field, returns:
+- `GET /health` → `{status, model_loaded, species, measurements}` (the last
+  is the list of measurement keys the currently-loaded checkpoint's schema
+  defines)
+- `POST /predict` → multipart form with a `file` field, returns a legacy flat
+  shape (kept stable for the current PWA) plus a generic, forward-looking
+  `measurements` map — one entry per schema measurement:
 
 ```json
 {
   "species": "Kappaphycus alvarezii",
+  "is_seaweed": true,
+  "condition": "Disease",
   "health": "Moderate",
+  "health_score": 62.1,
   "confidence": 0.974,
+  "disease_subtype": "IceIce",
+  "dried_pct": null,
+  "decayed_pct": null,
   "explanation": "Minor bleaching on branches and early tissue degradation observed.",
   "recommendation": "Increase water movement. Inspect for grazers and early disease signs.",
-  "gradcam_png_base64": "..."
+  "gradcam_png_base64": "...",
+  "measurements": {
+    "condition": {"type": "classification", "value": "Disease", "confidence": 0.974, "explanation": "...", "recommendation": "...", "coverage": null, "mask_png_base64": null},
+    "disease_subtype": {"type": "classification", "value": "IceIce", "confidence": 0.88, "explanation": null, "recommendation": null, "coverage": null, "mask_png_base64": null},
+    "health_score": {"type": "regression", "value": 62.1, "confidence": null, "explanation": null, "recommendation": null, "coverage": null, "mask_png_base64": null}
+  }
 }
 ```
 
-Test it directly:
+- `POST /admin/reload` → hot-swaps the running checkpoint (weights + schema)
+  from a `model_url` without restarting the process; requires a
+  `RELOAD_TOKEN` bearer token. Called by the admin "Promote" action — see
+  [`DEPLOY_ML_API.md`](DEPLOY_ML_API.md).
+
+Test `/predict` directly:
 
 ```bash
 curl -F "file=@/path/to/photo.jpg" http://localhost:8000/predict
@@ -275,8 +314,8 @@ curl -F "file=@/path/to/photo.jpg" http://localhost:8000/predict
 
 The response shape already includes `species` so that real species
 identification (Milestone 7+/long-term) slots in without a breaking change —
-today it's a constant (`SPECIES_NAME` in `src/inference/predictor.py`)
-because Phase 1 supports only one species.
+today it's fixed to the schema's single active species because Phase 1
+supports only one.
 
 ---
 
@@ -376,53 +415,49 @@ TensorFlow Lite or CoreML for native mobile builds later.
 
 ## Long-Term Roadmap (Future Expansion)
 
-The architecture is deliberately modular — every block below is its own
-independently trainable/deployable model, not a monolith:
+Unlike the original folder-taxonomy design (where each new capability meant a
+new model, a new module, and a new API endpoint), the schema-driven
+architecture means most of the roadmap below is **an admin-UI schema edit —
+add a measurement, relabel some photos, retrain** — not new code:
 
 ```
 Image
   |
   v
-Species Identification
-  |
-  +---------------------------+
-  |                           |
-Kappaphycus alvarezii   Eucheuma denticulatum (etc.)
+condition (classification, incl. Background/no-subject)
   |
   v
-Health Classification  <-- this scaffold builds exactly this, for one species
+health_score (regression)  ->  display level (Healthy/Moderate/Low)
   |
-  v
-If unhealthy:
-  +--------+-----------+------------------+
-  v        v           v
-Disease  Predator   Damage Estimation (segmentation, U-Net, % damaged)
-Model     Model
+If Disease:
+  disease_subtype (classification, applies_when condition == "Disease")
 ```
 
-Roadmap, in the order the spec recommends tackling them:
+Every measurement below can be added the same way `disease_subtype` and
+`health_score` already are — as an entry in the measurement schema — with no
+change to the model, dataset loader, losses, or predictor:
 
-1. **Species Identification** — a second classifier run before health
-   classification; add as `ml/src/models/species_classifier.py` and a
-   `/predict/species` (or a combined pipeline) endpoint. Becomes the first
-   stage once more species are supported (`Eucheuma denticulatum`,
+1. **Species Identification** — add a `species` classification measurement
+   (or extend the schema's `species` list + a `species` measurement) once
+   more than one species has labeled data (`Eucheuma denticulatum`,
    `Gracilaria`, `Ulva`, `Sargassum`).
-2. **Disease Model** — runs only when `health != Healthy`. New classifier,
-   outputs e.g. `Ice-Ice Disease`, `Epiphyte Infection`, `Bacterial Disease`,
-   `Unknown`.
-3. **Predator Model** — same trigger condition, outputs e.g. `Rabbitfish`,
-   `Sea Urchin`, `Parrotfish`, `Crab`, `Unknown`.
-4. **Damage/Decay Estimation** — not a classifier: image → segmentation
-   (U-Net) → percentage of tissue damaged (e.g. "Decay: 18.7%").
-5. **Region Detection** — another segmentation model, outputs per-pixel
-   `Healthy Tissue` / `Damaged Tissue` / `Predator Bite` / `Disease Spot`.
-6. **Treatment Recommendation** — currently a static lookup
-   (`src/inference/explanations.py`); can later be model- or rule-engine
-   driven per disease/predator/region combination.
-7. **Farm Analytics** — aggregate prediction history (once Supabase is
-   wired up) across farms/regions/time for trend detection.
+2. **Predator detection** — a new classification measurement (e.g. keyed
+   `predator`, `applies_when condition == "Disease"` or its own trigger),
+   outputs e.g. `Rabbitfish`, `Sea Urchin`, `Parrotfish`, `Crab`, `Unknown`.
+3. **Damage/Decay extent** — already modeled today as the `dried_extent`/
+   `decayed_extent`-style regression measurements once real percentages are
+   collected (currently masked/untrained — no data yet).
+4. **Region/pixel-level detection** — a segmentation measurement (like the
+   default schema's `biofouling` slot), outputs per-pixel class coverage +
+   an overlay mask; requires mask ground truth (upload via `/admin/dataset`).
+5. **Treatment Recommendation** — already schema-driven: preset
+   `explanation`/`recommendation` copy lives per class, editable in
+   `/admin/schema`, and travels with the checkpoint on promotion (no
+   separate lookup file to maintain).
+6. **Farm Analytics** — aggregate prediction history (once an end-user
+   prediction-history table is wired up in Supabase, see 7.3 above) across
+   regions/time for trend detection.
 
-Each new model should follow the same pattern already established here: its
-own module under `ml/src/models/`, its own training/evaluation scripts (or
-shared ones parameterized by config), and an additive API endpoint — never a
-change to an existing model's contract.
+The one thing schema edits can't do alone is a genuinely new *input
+modality* (e.g. a second photo angle, sensor readings) — that still needs
+its own dataset/model plumbing.
