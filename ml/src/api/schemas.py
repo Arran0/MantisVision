@@ -25,3 +25,18 @@ class HealthCheckResponse(BaseModel):
     species: str
     conditions: list[str]
     disease_subtypes: list[str]
+
+
+class ReloadRequest(BaseModel):
+    # Direct-download URL of the promoted run's checkpoint (a GitHub Release
+    # asset, Supabase Storage object, etc.) — the same kind of URL used for
+    # MODEL_URL at cold start.
+    model_url: str
+
+
+class ReloadResponse(BaseModel):
+    status: str
+    model_loaded: bool
+    species: str
+    conditions: list[str]
+    disease_subtypes: list[str]

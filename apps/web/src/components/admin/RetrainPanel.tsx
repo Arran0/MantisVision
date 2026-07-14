@@ -65,7 +65,7 @@ export function RetrainPanel() {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error ?? "Failed to promote.");
-      setMessage(`${payload.instructions}\n\nCheckpoint: ${payload.checkpointUrl}`);
+      setMessage(payload?.message ?? "Model promoted — it is now serving live predictions.");
       await refresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Something went wrong.");

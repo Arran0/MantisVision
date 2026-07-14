@@ -13,16 +13,22 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from config import SPECIES, config  # noqa: E402
-from src.api.schemas import HealthCheckResponse, PredictionResponse  # noqa: E402
+from src.api.schemas import (  # noqa: E402
+    HealthCheckResponse,
+    PredictionResponse,
+    ReloadRequest,
+    ReloadResponse,
+)
 from src.inference.predictor import Predictor  # noqa: E402
 
 logger = logging.getLogger("mantis_vision.api")
@@ -34,6 +40,12 @@ logging.basicConfig(level=logging.INFO)
 CHECKPOINT_DOWNLOAD_TIMEOUT_S = 60
 
 _predictor: Predictor | None = None
+
+# Serialises /admin/reload so two concurrent promotions can't interleave their
+# download/verify/swap steps and race each other into a torn state. The actual
+# `_predictor = ...` reassignment is already atomic under the GIL; the lock is
+# about the multi-step sequence around it, not that single store.
+_reload_lock = threading.Lock()
 
 
 def _download_checkpoint(path: Path, url: str) -> None:
@@ -146,4 +158,63 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
         explanation=result.explanation,
         recommendation=result.recommendation,
         gradcam_png_base64=result.gradcam_base64_png,
+    )
+
+
+@app.post("/admin/reload", response_model=ReloadResponse)
+def reload_model(
+    body: ReloadRequest,
+    authorization: str | None = Header(default=None),
+) -> ReloadResponse:
+    """Hot-swap the live model with a promoted checkpoint — no process restart.
+
+    Called by the web app's promote route (apps/web/.../retrain/promote) when
+    an admin promotes a completed run. The new checkpoint is downloaded to a
+    *separate* temp file and loaded into a fresh Predictor first; only once
+    that succeeds is the module-level `_predictor` swapped and the temp file
+    moved over best_model.pt (so a later cold restart serves the same
+    version). A download or load failure leaves the currently-serving model
+    completely untouched and returns 502 — a bad checkpoint can never take
+    down live /predict traffic.
+    """
+    expected = os.environ.get("RELOAD_TOKEN")
+    if not expected:
+        # Fail closed: if no shared secret is configured, reload is disabled
+        # rather than open to anyone who can reach the endpoint.
+        raise HTTPException(
+            status_code=503,
+            detail="Model reload is not enabled (RELOAD_TOKEN is not set on this host).",
+        )
+    if authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Invalid or missing reload token.")
+
+    global _predictor
+    with _reload_lock:
+        checkpoint_path = config.checkpoints_dir / "best_model.pt"
+        # Distinct staging file — never write over the currently-serving
+        # best_model.pt until the download is verified loadable.
+        staging_path = checkpoint_path.parent / "best_model.reload.pt"
+        try:
+            _download_checkpoint(staging_path, body.model_url)
+            new_predictor = Predictor(staging_path)
+        except Exception as e:  # noqa: BLE001 - any failure must leave the old model serving
+            logger.exception("Model reload failed; keeping the currently-serving model.")
+            # Clean up the staging file and its download-intermediate so a
+            # failed reload leaves no half-written artifacts behind.
+            staging_path.unlink(missing_ok=True)
+            staging_path.with_suffix(".tmp").unlink(missing_ok=True)
+            raise HTTPException(status_code=502, detail=f"Model reload failed: {e}") from e
+
+        # New model verified loadable — swap it in and persist over
+        # best_model.pt so a future cold restart picks up the same version.
+        _predictor = new_predictor
+        os.replace(staging_path, checkpoint_path)
+        logger.info("Model hot-swapped from %s.", body.model_url)
+
+    return ReloadResponse(
+        status="ok",
+        model_loaded=True,
+        species=new_predictor.species_name,
+        conditions=new_predictor.condition_classes,
+        disease_subtypes=new_predictor.subtype_classes,
     )
