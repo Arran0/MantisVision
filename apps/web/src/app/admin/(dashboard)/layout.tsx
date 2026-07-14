@@ -2,9 +2,14 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AdminNav } from "@/components/admin/AdminNav";
 
-// Every /admin/* page (except /admin/login) is wrapped by this layout. This
-// is where the actual role check happens — middleware.ts only confirms a
-// session exists.
+// Every authed admin page is wrapped by this layout. /admin/login lives
+// outside the (dashboard) route group specifically so it does NOT inherit
+// this layout — nesting it here previously caused a redirect loop (an
+// unauthenticated visit to /admin/login would hit this layout's redirect
+// below, which points right back at /admin/login, forever).
+//
+// This is where the actual role check happens — middleware.ts only confirms
+// a session exists.
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const {
