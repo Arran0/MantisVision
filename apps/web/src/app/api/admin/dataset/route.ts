@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/supabase/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getActiveTaxonomy } from "@/lib/serverTaxonomy";
-import { findCondition, isSeverityName, isSubtypeName } from "@/lib/taxonomy";
+import { getActiveSchema } from "@/lib/serverSchema";
+import {
+  findMeasurement,
+  getPrimaryClassification,
+  isValueValidForMeasurement,
+  measurementApplies,
+  type SchemaDoc,
+} from "@/lib/schema";
 import type { TrainingImage } from "@/lib/types";
 
-const BUCKET = "training-images";
+const IMAGES_BUCKET = "training-images";
+const MASKS_BUCKET = "training-masks";
 const PAGE_SIZE = 30;
 const SIGNED_URL_TTL_S = 60 * 5;
 
@@ -22,14 +29,36 @@ function numberOrNull(value: FormDataEntryValue | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function pctOrNull(value: FormDataEntryValue | null): number | null {
-  const parsed = numberOrNull(value);
-  if (parsed === null) return null;
-  return Math.max(0, Math.min(100, parsed));
-}
-
 function stringOrNull(value: FormDataEntryValue | null): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+// Parses+validates the client-submitted `measurements` JSON field against the
+// active schema: each entry must name a real measurement, hold a legal value
+// for its type, and satisfy that measurement's applies_when (evaluated
+// against the *other* submitted measurement values) — e.g. disease_subtype is
+// rejected unless condition was submitted as "Disease". Returns either the
+// validated map or a human-readable error.
+function validateMeasurements(
+  schema: SchemaDoc,
+  raw: unknown
+): { ok: true; values: Record<string, string | number> } | { ok: false; error: string } {
+  if (typeof raw !== "object" || raw === null) return { ok: false, error: "'measurements' must be an object." };
+  const values = raw as Record<string, unknown>;
+
+  for (const [key, value] of Object.entries(values)) {
+    const measurement = findMeasurement(schema, key);
+    if (!measurement) return { ok: false, error: `Unknown measurement ${JSON.stringify(key)}.` };
+    if (measurement.type === "segmentation") continue; // segmentation values are filled in from uploaded mask files
+    if (!isValueValidForMeasurement(measurement, value))
+      return { ok: false, error: `Invalid value for measurement ${JSON.stringify(key)}.` };
+    if (!measurementApplies(measurement, values))
+      return {
+        ok: false,
+        error: `Measurement ${JSON.stringify(key)} does not apply given the other submitted values.`,
+      };
+  }
+  return { ok: true, values: values as Record<string, string | number> };
 }
 
 export async function POST(request: NextRequest) {
@@ -38,55 +67,62 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const file = formData.get("file");
-  const condition = formData.get("condition");
-
   if (!(file instanceof File) || !file.type.startsWith("image/")) {
     return NextResponse.json({ error: "Missing or invalid 'file' — must be an image." }, { status: 400 });
   }
 
   const admin = createAdminClient();
-  const taxonomy = await getActiveTaxonomy(admin);
+  const schema = await getActiveSchema(admin);
 
-  const condDef = typeof condition === "string" ? findCondition(taxonomy, condition) : undefined;
-  if (!condDef) {
-    return NextResponse.json({ error: "'condition' must be one of the known conditions." }, { status: 400 });
+  const measurementsRaw = (() => {
+    const raw = formData.get("measurements");
+    if (typeof raw !== "string") return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  })();
+  if (measurementsRaw === null) {
+    return NextResponse.json({ error: "'measurements' must be valid JSON." }, { status: 400 });
   }
 
-  const isBackground = condDef.is_background;
-  // A condition that carries a disease subtype (e.g. Disease) also takes a
-  // per-image severity. Fixed-severity conditions (e.g. Decay/Dried) pin their
-  // severity from the taxonomy; everything else has no severity token.
-  const needsSubtype = condDef.requires_subtype;
-
-  let severity: string | null = condDef.fixed_severity;
-  let subtype: string | null = null;
-  let diseaseName: string | null = null;
-  if (needsSubtype) {
-    const sev = formData.get("severity");
-    const sub = formData.get("subtype");
-    if (typeof sev !== "string" || !isSeverityName(taxonomy, sev)) {
-      return NextResponse.json({ error: `${condDef.name} requires a valid 'severity'.` }, { status: 400 });
-    }
-    if (typeof sub !== "string" || !isSubtypeName(taxonomy, sub)) {
-      return NextResponse.json({ error: `${condDef.name} requires a valid 'subtype'.` }, { status: 400 });
-    }
-    severity = sev;
-    subtype = sub;
-    // Disease name is free-form but must not contain underscores/spaces that
-    // would break the folder-naming convention when the retrain step
-    // materializes it into <...>_<Subtype>_<DiseaseName>.
-    const rawName = stringOrNull(formData.get("diseaseName"));
-    diseaseName = rawName ? rawName.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || null : null;
+  const validated = validateMeasurements(schema, measurementsRaw);
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
   }
+  const measurements: Record<string, string | number> = { ...validated.values };
+
+  // Upload any segmentation mask files (submitted as `mask:<measurementKey>`)
+  // to the training-masks bucket, then store the resulting path as that
+  // measurement's value.
+  for (const measurement of schema.measurements) {
+    if (measurement.type !== "segmentation") continue;
+    if (!measurementApplies(measurement, measurements)) continue;
+    const maskFile = formData.get(`mask:${measurement.key}`);
+    if (!(maskFile instanceof File)) continue;
+    const maskPath = `${measurement.key}/${crypto.randomUUID()}.${extensionFor(maskFile)}`;
+    const { error: maskUploadError } = await admin.storage
+      .from(MASKS_BUCKET)
+      .upload(maskPath, await maskFile.arrayBuffer(), { contentType: maskFile.type });
+    if (maskUploadError) {
+      return NextResponse.json({ error: `Mask upload failed: ${maskUploadError.message}` }, { status: 502 });
+    }
+    measurements[measurement.key] = maskPath;
+  }
+
+  const primary = getPrimaryClassification(schema);
+  const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
+  const isBackground = !!primary && primaryValue === primary.background_class;
 
   const activeSpeciesName =
-    taxonomy.species.find((s) => s.slug === taxonomy.active_species_slug)?.name ?? "Kappaphycus alvarezii";
+    schema.species.find((s) => s.slug === schema.active_species_slug)?.name ?? schema.species[0]?.name ?? null;
   const species = isBackground ? null : stringOrNull(formData.get("species")) ?? activeSpeciesName;
 
-  const storagePath = `${condDef.name}/${crypto.randomUUID()}.${extensionFor(file)}`;
+  const storagePath = `${primaryValue ?? "uncategorized"}/${crypto.randomUUID()}.${extensionFor(file)}`;
 
   const { error: uploadError } = await admin.storage
-    .from(BUCKET)
+    .from(IMAGES_BUCKET)
     .upload(storagePath, await file.arrayBuffer(), { contentType: file.type });
 
   if (uploadError) {
@@ -96,21 +132,23 @@ export async function POST(request: NextRequest) {
   const gpsLat = numberOrNull(formData.get("gpsLat"));
   const gpsLng = numberOrNull(formData.get("gpsLng"));
 
+  // Legacy flat columns are populated opportunistically from the well-known
+  // measurement keys (for existing queries/back-compat); they're no longer
+  // the source of truth for training — `measurements` is.
   const { data: row, error: insertError } = await admin
     .from("training_images")
     .insert({
       created_by: auth.context.userId,
       storage_path: storagePath,
-      condition: condDef.name,
+      measurements,
+      condition: typeof measurements["condition"] === "string" ? measurements["condition"] : null,
+      subtype: typeof measurements["disease_subtype"] === "string" ? measurements["disease_subtype"] : null,
+      health_score: typeof measurements["health_score"] === "number" ? measurements["health_score"] : null,
+      dried_pct: typeof measurements["dried_extent"] === "number" ? measurements["dried_extent"] : null,
+      decayed_pct: typeof measurements["decayed_extent"] === "number" ? measurements["decayed_extent"] : null,
       is_background: isBackground,
-      severity,
-      subtype,
-      disease_name: diseaseName,
       species,
       colour: isBackground ? null : stringOrNull(formData.get("colour")),
-      health_score: isBackground ? null : pctOrNull(formData.get("healthScore")),
-      dried_pct: isBackground ? null : pctOrNull(formData.get("driedPct")),
-      decayed_pct: isBackground ? null : pctOrNull(formData.get("decayedPct")),
       notes: stringOrNull(formData.get("notes")),
       farm: stringOrNull(formData.get("farm")),
       camera: stringOrNull(formData.get("camera")),
@@ -125,7 +163,7 @@ export async function POST(request: NextRequest) {
 
   if (insertError || !row) {
     // Don't leave an orphaned object in storage if the DB insert failed.
-    await admin.storage.from(BUCKET).remove([storagePath]);
+    await admin.storage.from(IMAGES_BUCKET).remove([storagePath]);
     return NextResponse.json(
       { error: `Failed to save the label: ${insertError?.message ?? "unknown error"}` },
       { status: 502 }
@@ -146,9 +184,7 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
   const { data: rows, error } = await admin
     .from("training_images")
-    .select(
-      "id, created_at, created_by, species, colour, condition, severity, subtype, disease_name, notes, farm, status, storage_path"
-    )
+    .select("id, created_at, created_by, species, colour, measurements, notes, farm, status, storage_path")
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -159,7 +195,7 @@ export async function GET(request: NextRequest) {
   const images: TrainingImage[] = await Promise.all(
     (rows ?? []).map(async (row) => {
       const { data: signed } = await admin.storage
-        .from(BUCKET)
+        .from(IMAGES_BUCKET)
         .createSignedUrl(row.storage_path, SIGNED_URL_TTL_S);
       return {
         id: row.id,
@@ -167,10 +203,7 @@ export async function GET(request: NextRequest) {
         createdBy: row.created_by,
         species: row.species,
         colour: row.colour,
-        condition: row.condition,
-        severity: row.severity,
-        subtype: row.subtype,
-        diseaseName: row.disease_name,
+        measurements: (row.measurements as Record<string, string | number>) ?? {},
         notes: row.notes,
         farm: row.farm,
         status: row.status,

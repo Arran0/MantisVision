@@ -15,8 +15,7 @@ export function DatasetTable({ images, loading }: { images: TrainingImage[]; loa
           <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
             <th className="px-3 py-2">Photo</th>
             <th className="px-3 py-2">Species</th>
-            <th className="px-3 py-2">Condition</th>
-            <th className="px-3 py-2">Detail</th>
+            <th className="px-3 py-2">Measurements</th>
             <th className="px-3 py-2">Farm</th>
             <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2">Added</th>
@@ -37,11 +36,12 @@ export function DatasetTable({ images, loading }: { images: TrainingImage[]; loa
                 )}
               </td>
               <td className="px-3 py-2 italic text-slate-800">{image.species ?? "—"}</td>
-              <td className="px-3 py-2 font-medium text-slate-800">{image.condition}</td>
               <td className="px-3 py-2 text-slate-600">
-                {image.condition === "Disease"
-                  ? [image.severity, image.subtype, image.diseaseName].filter(Boolean).join(" · ") || "—"
-                  : "—"}
+                {Object.keys(image.measurements).length === 0
+                  ? "—"
+                  : Object.entries(image.measurements)
+                      .map(([key, value]) => `${key}: ${value}`)
+                      .join(" · ")}
               </td>
               <td className="px-3 py-2 text-slate-600">{image.farm ?? "—"}</td>
               <td className="px-3 py-2 text-slate-600">{image.status}</td>

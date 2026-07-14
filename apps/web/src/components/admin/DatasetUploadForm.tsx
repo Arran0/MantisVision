@@ -1,25 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DEFAULT_TAXONOMY, findCondition, type TaxonomyDoc } from "@/lib/taxonomy";
+import {
+  DEFAULT_SCHEMA,
+  getPrimaryClassification,
+  measurementApplies,
+  type SchemaDoc,
+} from "@/lib/schema";
+
+const INPUT = "rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900";
+const LABEL = "flex flex-col gap-1 text-sm font-medium text-slate-700";
 
 export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   // Starts from the built-in defaults and swaps to the live, admin-edited
-  // taxonomy once it loads, so new species/conditions/subtypes appear here.
-  const [taxonomy, setTaxonomy] = useState<TaxonomyDoc>(DEFAULT_TAXONOMY);
+  // schema once it loads, so new measurements/species/classes appear here
+  // with no code change.
+  const [schema, setSchema] = useState<SchemaDoc>(DEFAULT_SCHEMA);
   const [file, setFile] = useState<File | null>(null);
-  const [condition, setCondition] = useState<string>("Healthy");
-  const [severity, setSeverity] = useState<string>(DEFAULT_TAXONOMY.severities[0]);
-  const [subtype, setSubtype] = useState<string>(DEFAULT_TAXONOMY.disease_subtypes[0]?.name ?? "");
-  const [diseaseName, setDiseaseName] = useState("");
-  const [species, setSpecies] = useState("Kappaphycus alvarezii");
+  const [species, setSpecies] = useState("");
+
+  // One value per measurement, keyed by measurement key. Classification ->
+  // selected class name; regression -> raw number-input string (blank =
+  // unset, falls back to the ML pipeline's anchor); segmentation -> an
+  // uploaded mask file.
+  const [classValues, setClassValues] = useState<Record<string, string>>({});
+  const [numberValues, setNumberValues] = useState<Record<string, string>>({});
+  const [maskFiles, setMaskFiles] = useState<Record<string, File | null>>({});
+
   const [colour, setColour] = useState("");
   const [notes, setNotes] = useState("");
-
-  // Optional numeric overrides — blank falls back to the heuristic anchors in ml/config.py.
-  const [healthScore, setHealthScore] = useState("");
-  const [driedPct, setDriedPct] = useState("");
-  const [decayedPct, setDecayedPct] = useState("");
 
   const [showMore, setShowMore] = useState(false);
   const [farm, setFarm] = useState("");
@@ -34,38 +43,42 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function applyDefaults(doc: SchemaDoc) {
+    setSchema(doc);
+    setClassValues((prev) => {
+      const next = { ...prev };
+      for (const m of doc.measurements) {
+        if (m.type === "classification" && (!next[m.key] || !m.classes?.some((c) => c.name === next[m.key]))) {
+          next[m.key] = m.classes?.[0]?.name ?? "";
+        }
+      }
+      return next;
+    });
+    setSpecies((prev) => prev || doc.species.find((s) => s.slug === doc.active_species_slug)?.name || "");
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const response = await fetch("/api/admin/taxonomy");
+      const response = await fetch("/api/admin/schema");
       const payload = await response.json().catch(() => null);
-      if (!cancelled && response.ok && payload?.taxonomy) {
-        const doc = payload.taxonomy as TaxonomyDoc;
-        setTaxonomy(doc);
-        setSeverity((prev) => (doc.severities.includes(prev) ? prev : doc.severities[0] ?? prev));
-        setSubtype((prev) =>
-          doc.disease_subtypes.some((s) => s.name === prev) ? prev : doc.disease_subtypes[0]?.name ?? prev
-        );
-        setCondition((prev) => (doc.conditions.some((c) => c.name === prev) ? prev : doc.conditions[0]?.name ?? prev));
-      }
+      if (!cancelled && response.ok && payload?.schema) applyDefaults(payload.schema as SchemaDoc);
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const condDef = findCondition(taxonomy, condition);
-  const needsSubtype = condDef?.requires_subtype ?? false;
-  const isBackground = condDef?.is_background ?? false;
+  const primary = getPrimaryClassification(schema);
+  const isBackground = !!primary && classValues[primary.key] === primary.background_class;
 
   function resetForm() {
     setFile(null);
     setColour("");
     setNotes("");
-    setDiseaseName("");
-    setHealthScore("");
-    setDriedPct("");
-    setDecayedPct("");
+    setNumberValues({});
+    setMaskFiles({});
     setFarm("");
     setCamera("");
     setCapturedAt("");
@@ -85,20 +98,33 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     setSubmitting(true);
     setError(null);
 
+    const measurements: Record<string, string | number> = {};
+    for (const m of schema.measurements) {
+      if (!measurementApplies(m, classValues)) continue;
+      if (m.type === "classification") {
+        const value = classValues[m.key];
+        if (value) measurements[m.key] = value;
+      } else if (m.type === "regression") {
+        const raw = numberValues[m.key];
+        if (raw !== undefined && raw.trim() !== "") {
+          const num = Number(raw);
+          if (Number.isFinite(num)) measurements[m.key] = num;
+        }
+      }
+      // segmentation values are attached server-side from the uploaded mask file
+    }
+
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("condition", condition);
-    if (needsSubtype) {
-      formData.append("severity", severity);
-      formData.append("subtype", subtype);
-      formData.append("diseaseName", diseaseName);
+    formData.append("measurements", JSON.stringify(measurements));
+    for (const m of schema.measurements) {
+      if (m.type !== "segmentation" || !measurementApplies(m, classValues)) continue;
+      const maskFile = maskFiles[m.key];
+      if (maskFile) formData.append(`mask:${m.key}`, maskFile);
     }
     if (!isBackground) {
       formData.append("species", species);
       formData.append("colour", colour);
-      formData.append("healthScore", healthScore);
-      formData.append("driedPct", driedPct);
-      formData.append("decayedPct", decayedPct);
     }
     formData.append("notes", notes);
     formData.append("farm", farm);
@@ -129,7 +155,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     <form onSubmit={handleSubmit} className="mv-card flex flex-col gap-4 p-6">
       <h2 className="text-lg font-semibold text-slate-900">Label a new photo</h2>
 
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+      <label className={LABEL}>
         Photo
         <input
           type="file"
@@ -140,137 +166,96 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
         />
       </label>
 
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-        Condition
-        <select
-          required
-          value={condition}
-          onChange={(event) => setCondition(event.target.value)}
-          className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-        >
-          {taxonomy.conditions.map((option) => (
-            <option key={option.name} value={option.name}>
-              {option.is_background ? `${option.name} (no seaweed)` : option.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* One control per schema measurement, in schema order. A measurement
+          with an applies_when that isn't satisfied by the current selections
+          (e.g. disease_subtype when condition != Disease) is hidden. */}
+      {schema.measurements.map((m) => {
+        if (!measurementApplies(m, classValues)) return null;
 
-      {needsSubtype && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-            Severity
-            <select
-              value={severity}
-              onChange={(event) => setSeverity(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-            >
-              {taxonomy.severities.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+        if (m.type === "classification") {
+          return (
+            <label key={m.key} className={LABEL}>
+              {m.label}
+              <select
+                required
+                value={classValues[m.key] ?? ""}
+                onChange={(event) => setClassValues((prev) => ({ ...prev, [m.key]: event.target.value }))}
+                className={INPUT}
+              >
+                {(m.classes ?? []).map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {m.background_class === c.name ? `${c.name} (no subject)` : c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        }
+
+        if (m.type === "regression") {
+          return (
+            <label key={m.key} className="flex flex-col gap-1 text-sm text-slate-700">
+              {m.label} ({m.min ?? 0}–{m.max ?? 100}{m.unit ? ` ${m.unit}` : ""}, optional)
+              <input
+                type="number"
+                min={m.min ?? 0}
+                max={m.max ?? 100}
+                value={numberValues[m.key] ?? ""}
+                onChange={(event) => setNumberValues((prev) => ({ ...prev, [m.key]: event.target.value }))}
+                placeholder="anchor if blank"
+                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
+              />
+            </label>
+          );
+        }
+
+        // segmentation
+        return (
+          <label key={m.key} className="flex flex-col gap-1 text-sm text-slate-700">
+            {m.label} mask (optional)
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) =>
+                setMaskFiles((prev) => ({ ...prev, [m.key]: event.target.files?.[0] ?? null }))
+              }
+              className="text-sm"
+            />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-            Subtype
-            <select
-              value={subtype}
-              onChange={(event) => setSubtype(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-            >
-              {taxonomy.disease_subtypes.map((option) => (
-                <option key={option.name} value={option.name}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-            Disease name (optional)
+        );
+      })}
+
+      {!isBackground && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className={LABEL}>
+            Species
             <input
               type="text"
-              value={diseaseName}
-              onChange={(event) => setDiseaseName(event.target.value)}
-              placeholder="e.g. Vibrio_sp"
-              className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+              value={species}
+              onChange={(event) => setSpecies(event.target.value)}
+              className={INPUT}
+            />
+          </label>
+          <label className={LABEL}>
+            Colour
+            <input
+              type="text"
+              value={colour}
+              onChange={(event) => setColour(event.target.value)}
+              placeholder="e.g. dark green"
+              className={INPUT}
             />
           </label>
         </div>
       )}
 
-      {!isBackground && (
-        <>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-              Species
-              <input
-                type="text"
-                value={species}
-                onChange={(event) => setSpecies(event.target.value)}
-                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-              Colour
-              <input
-                type="text"
-                value={colour}
-                onChange={(event) => setColour(event.target.value)}
-                placeholder="e.g. dark green"
-                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
-              />
-            </label>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <label className="flex flex-col gap-1 text-sm text-slate-700">
-              Health score (0–100, optional)
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={healthScore}
-                onChange={(event) => setHealthScore(event.target.value)}
-                placeholder="anchor if blank"
-                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm text-slate-700">
-              Dried % (optional)
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={driedPct}
-                onChange={(event) => setDriedPct(event.target.value)}
-                placeholder="anchor if blank"
-                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm text-slate-700">
-              Decayed % (optional)
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={decayedPct}
-                onChange={(event) => setDecayedPct(event.target.value)}
-                placeholder="anchor if blank"
-                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900"
-              />
-            </label>
-          </div>
-        </>
-      )}
-
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+      <label className={LABEL}>
         Notes
         <textarea
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
           rows={2}
-          className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
+          className={INPUT}
         />
       </label>
 
