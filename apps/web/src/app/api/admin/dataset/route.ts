@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/supabase/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isCondition, isSeverity, isDiseaseSubtype } from "@/lib/taxonomy";
+import { getActiveTaxonomy } from "@/lib/serverTaxonomy";
+import { findCondition, isSeverityName, isSubtypeName } from "@/lib/taxonomy";
 import type { TrainingImage } from "@/lib/types";
 
 const BUCKET = "training-images";
@@ -42,24 +43,32 @@ export async function POST(request: NextRequest) {
   if (!(file instanceof File) || !file.type.startsWith("image/")) {
     return NextResponse.json({ error: "Missing or invalid 'file' — must be an image." }, { status: 400 });
   }
-  if (typeof condition !== "string" || !isCondition(condition)) {
+
+  const admin = createAdminClient();
+  const taxonomy = await getActiveTaxonomy(admin);
+
+  const condDef = typeof condition === "string" ? findCondition(taxonomy, condition) : undefined;
+  if (!condDef) {
     return NextResponse.json({ error: "'condition' must be one of the known conditions." }, { status: 400 });
   }
 
-  const isBackground = condition === "Background";
-  const isDisease = condition === "Disease";
+  const isBackground = condDef.is_background;
+  // A condition that carries a disease subtype (e.g. Disease) also takes a
+  // per-image severity. Fixed-severity conditions (e.g. Decay/Dried) pin their
+  // severity from the taxonomy; everything else has no severity token.
+  const needsSubtype = condDef.requires_subtype;
 
-  let severity: string | null = null;
+  let severity: string | null = condDef.fixed_severity;
   let subtype: string | null = null;
   let diseaseName: string | null = null;
-  if (isDisease) {
+  if (needsSubtype) {
     const sev = formData.get("severity");
     const sub = formData.get("subtype");
-    if (typeof sev !== "string" || !isSeverity(sev)) {
-      return NextResponse.json({ error: "Disease requires a valid 'severity'." }, { status: 400 });
+    if (typeof sev !== "string" || !isSeverityName(taxonomy, sev)) {
+      return NextResponse.json({ error: `${condDef.name} requires a valid 'severity'.` }, { status: 400 });
     }
-    if (typeof sub !== "string" || !isDiseaseSubtype(sub)) {
-      return NextResponse.json({ error: "Disease requires a valid 'subtype'." }, { status: 400 });
+    if (typeof sub !== "string" || !isSubtypeName(taxonomy, sub)) {
+      return NextResponse.json({ error: `${condDef.name} requires a valid 'subtype'.` }, { status: 400 });
     }
     severity = sev;
     subtype = sub;
@@ -70,12 +79,11 @@ export async function POST(request: NextRequest) {
     diseaseName = rawName ? rawName.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || null : null;
   }
 
-  const species = isBackground
-    ? null
-    : stringOrNull(formData.get("species")) ?? "Kappaphycus alvarezii";
+  const activeSpeciesName =
+    taxonomy.species.find((s) => s.slug === taxonomy.active_species_slug)?.name ?? "Kappaphycus alvarezii";
+  const species = isBackground ? null : stringOrNull(formData.get("species")) ?? activeSpeciesName;
 
-  const admin = createAdminClient();
-  const storagePath = `${condition}/${crypto.randomUUID()}.${extensionFor(file)}`;
+  const storagePath = `${condDef.name}/${crypto.randomUUID()}.${extensionFor(file)}`;
 
   const { error: uploadError } = await admin.storage
     .from(BUCKET)
@@ -93,7 +101,7 @@ export async function POST(request: NextRequest) {
     .insert({
       created_by: auth.context.userId,
       storage_path: storagePath,
-      condition,
+      condition: condDef.name,
       is_background: isBackground,
       severity,
       subtype,

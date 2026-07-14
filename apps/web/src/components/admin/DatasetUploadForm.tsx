@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { CONDITIONS, SEVERITIES, DISEASE_SUBTYPES } from "@/lib/taxonomy";
+import { useEffect, useState } from "react";
+import { DEFAULT_TAXONOMY, findCondition, type TaxonomyDoc } from "@/lib/taxonomy";
 
 export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
+  // Starts from the built-in defaults and swaps to the live, admin-edited
+  // taxonomy once it loads, so new species/conditions/subtypes appear here.
+  const [taxonomy, setTaxonomy] = useState<TaxonomyDoc>(DEFAULT_TAXONOMY);
   const [file, setFile] = useState<File | null>(null);
   const [condition, setCondition] = useState<string>("Healthy");
-  const [severity, setSeverity] = useState<string>(SEVERITIES[0]);
-  const [subtype, setSubtype] = useState<string>(DISEASE_SUBTYPES[0]);
+  const [severity, setSeverity] = useState<string>(DEFAULT_TAXONOMY.severities[0]);
+  const [subtype, setSubtype] = useState<string>(DEFAULT_TAXONOMY.disease_subtypes[0]?.name ?? "");
   const [diseaseName, setDiseaseName] = useState("");
   const [species, setSpecies] = useState("Kappaphycus alvarezii");
   const [colour, setColour] = useState("");
@@ -31,8 +34,29 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isDisease = condition === "Disease";
-  const isBackground = condition === "Background";
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const response = await fetch("/api/admin/taxonomy");
+      const payload = await response.json().catch(() => null);
+      if (!cancelled && response.ok && payload?.taxonomy) {
+        const doc = payload.taxonomy as TaxonomyDoc;
+        setTaxonomy(doc);
+        setSeverity((prev) => (doc.severities.includes(prev) ? prev : doc.severities[0] ?? prev));
+        setSubtype((prev) =>
+          doc.disease_subtypes.some((s) => s.name === prev) ? prev : doc.disease_subtypes[0]?.name ?? prev
+        );
+        setCondition((prev) => (doc.conditions.some((c) => c.name === prev) ? prev : doc.conditions[0]?.name ?? prev));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const condDef = findCondition(taxonomy, condition);
+  const needsSubtype = condDef?.requires_subtype ?? false;
+  const isBackground = condDef?.is_background ?? false;
 
   function resetForm() {
     setFile(null);
@@ -64,7 +88,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("condition", condition);
-    if (isDisease) {
+    if (needsSubtype) {
       formData.append("severity", severity);
       formData.append("subtype", subtype);
       formData.append("diseaseName", diseaseName);
@@ -124,15 +148,15 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
           onChange={(event) => setCondition(event.target.value)}
           className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
         >
-          {CONDITIONS.map((option) => (
-            <option key={option} value={option}>
-              {option === "Background" ? "Background (no seaweed)" : option}
+          {taxonomy.conditions.map((option) => (
+            <option key={option.name} value={option.name}>
+              {option.is_background ? `${option.name} (no seaweed)` : option.name}
             </option>
           ))}
         </select>
       </label>
 
-      {isDisease && (
+      {needsSubtype && (
         <div className="grid gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
             Severity
@@ -141,7 +165,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
               onChange={(event) => setSeverity(event.target.value)}
               className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
             >
-              {SEVERITIES.map((option) => (
+              {taxonomy.severities.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
@@ -155,9 +179,9 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
               onChange={(event) => setSubtype(event.target.value)}
               className="rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-base text-slate-900"
             >
-              {DISEASE_SUBTYPES.map((option) => (
-                <option key={option} value={option}>
-                  {option}
+              {taxonomy.disease_subtypes.map((option) => (
+                <option key={option.name} value={option.name}>
+                  {option.name}
                 </option>
               ))}
             </select>
