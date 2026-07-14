@@ -1,40 +1,27 @@
-"""Dataloader construction for the multi-head seaweed model.
+"""Dataloader construction for the schema-driven multi-head seaweed model.
 
-Expects flat, ImageFolder-compatible class folders whose names encode
-structured labels (see src/data/labels.py):
-
-    dataset/<species_slug>/train/<class_folder>/*.jpg
-    dataset/<species_slug>/validation/<class_folder>/*.jpg
-    dataset/<species_slug>/test/<class_folder>/*.jpg
-
-We keep torchvision's ImageFolder for robust, well-tested file discovery, then
-wrap it so each sample yields the full set of multi-head targets rather than a
-single class index. Folder -> targets goes entirely through labels.py, so the
-naming convention lives in one place.
+Each split directory (dataset/<species_slug>/{train,validation,test}/) holds
+flat images/ + masks/<key>/ + an annotations.jsonl manifest (see
+src/data/annotations.py) — replacing the old ImageFolder class-folder
+convention, since per-image column annotations (not folder names) are now the
+source of truth. Which targets get built, and how many, is entirely driven by
+the active Schema, so a newly admin-added measurement needs no dataset.py
+change: its (target, mask) pair is produced generically by
+annotations.derive_targets / load_segmentation_target.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
+import torch.nn.functional as F
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-from torchvision.datasets import ImageFolder
 
-from config import Config
-from src.data.labels import BACKGROUND, derive_targets, parse_class_folder
+from config import Config, Schema
+from src.data.annotations import AnnotationRow, derive_targets, load_manifest, load_segmentation_target
 from src.data.transforms import build_transforms
-
-# Keys produced per sample. Integer-typed targets (class indices) vs float
-# targets (regression values + masks) are collated into different dtypes.
-_INT_KEYS = ("condition_id", "subtype_id")
-_FLOAT_KEYS = (
-    "health_score",
-    "dried_extent",
-    "decayed_extent",
-    "subtype_mask",
-    "health_mask",
-    "extent_mask",
-)
 
 
 @dataclass
@@ -42,63 +29,99 @@ class Dataloaders:
     train: DataLoader
     val: DataLoader
     test: DataLoader
-    condition_classes: list[str]
-    subtype_classes: list[str]
+    schema: Schema
 
 
-class SeaweedDataset(Dataset):
-    """Wraps ImageFolder; maps each sample's folder to multi-head targets."""
+class AnnotatedDataset(Dataset):
+    """Wraps a split directory's annotations.jsonl manifest; each sample
+    yields the image tensor plus the full set of per-measurement targets."""
 
-    def __init__(self, root, cfg: Config, train: bool) -> None:
-        self.inner = ImageFolder(root, transform=build_transforms(cfg, train=train))
+    def __init__(self, root: Path, cfg: Config, schema: Schema, train: bool) -> None:
+        self.root = Path(root)
         self.cfg = cfg
-        # Precompute targets per ImageFolder class index so we don't re-parse
-        # a folder name on every __getitem__.
-        self._targets_by_folder_idx: dict[int, dict] = {}
-        for folder_name, folder_idx in self.inner.class_to_idx.items():
-            parsed = parse_class_folder(folder_name, cfg.species_slug)
-            self._targets_by_folder_idx[folder_idx] = derive_targets(parsed)
+        self.schema = schema
+        self.transform = build_transforms(cfg, train=train)
+        self.rows: list[AnnotationRow] = load_manifest(self.root / "annotations.jsonl")
 
     def __len__(self) -> int:
-        return len(self.inner)
+        return len(self.rows)
 
     def __getitem__(self, index: int):
-        image, folder_idx = self.inner[index]
-        return image, self._targets_by_folder_idx[folder_idx]
+        row = self.rows[index]
+        image = Image.open(self.root / "images" / row.filename).convert("RGB")
+        image = self.transform(image)
 
-    @property
-    def folder_names(self) -> list[str]:
-        return self.inner.classes
+        targets = derive_targets(self.schema, row.measurements)
+        for m in self.schema.measurements:
+            if m.type != "segmentation":
+                continue
+            mask, flag = load_segmentation_target(self.root, m, row)
+            # Resize to the model's input resolution regardless of the mask's
+            # source size (including the 1x1 "no mask" placeholder, which
+            # nearest-neighbor-upsamples to a uniform all-zero mask).
+            resized = F.interpolate(
+                mask.unsqueeze(0).unsqueeze(0).float(),
+                size=(self.cfg.image_size, self.cfg.image_size),
+                mode="nearest",
+            )
+            targets[f"{m.key}_seg"] = resized.squeeze(0).squeeze(0).long()
+            targets[f"{m.key}_seg_mask"] = flag
+
+        return image, targets
 
 
-def _collate(batch):
-    images = torch.stack([item[0] for item in batch])
-    targets: dict[str, torch.Tensor] = {}
-    for key in _INT_KEYS:
-        targets[key] = torch.tensor([item[1][key] for item in batch], dtype=torch.long)
-    for key in _FLOAT_KEYS:
-        targets[key] = torch.tensor([item[1][key] for item in batch], dtype=torch.float32)
-    return images, targets
+def build_collate(schema: Schema):
+    def _collate(batch):
+        images = torch.stack([item[0] for item in batch])
+        targets: dict[str, torch.Tensor] = {}
+        for m in schema.measurements:
+            if m.type == "classification":
+                targets[f"{m.key}_id"] = torch.tensor([item[1][f"{m.key}_id"] for item in batch], dtype=torch.long)
+                targets[f"{m.key}_mask"] = torch.tensor(
+                    [item[1][f"{m.key}_mask"] for item in batch], dtype=torch.float32
+                )
+            elif m.type == "regression":
+                targets[m.key] = torch.tensor([item[1][m.key] for item in batch], dtype=torch.float32)
+                targets[f"{m.key}_mask"] = torch.tensor(
+                    [item[1][f"{m.key}_mask"] for item in batch], dtype=torch.float32
+                )
+            elif m.type == "segmentation":
+                targets[f"{m.key}_seg"] = torch.stack([item[1][f"{m.key}_seg"] for item in batch])
+                targets[f"{m.key}_seg_mask"] = torch.tensor(
+                    [item[1][f"{m.key}_seg_mask"] for item in batch], dtype=torch.float32
+                )
+        return images, targets
+
+    return _collate
 
 
-def _verify_dataset(dataset: SeaweedDataset) -> None:
-    # parse_class_folder already ran (would have raised on a bad name); here we
-    # just insist the Background negative class is present, since the whole
-    # point of the N+1 design is to have negatives to train against.
-    if BACKGROUND not in dataset.folder_names:
+def _verify_dataset(rows: list[AnnotationRow], schema: Schema, split_name: str) -> None:
+    # The model needs negatives to train against — the whole point of the N+1
+    # design. Only enforced when the schema actually declares a background
+    # class (a schema is free not to have one, though the web validator
+    # requires at least one across the whole schema).
+    primary = schema.primary_classification()
+    if primary is None:
+        return
+    values = {row.measurements.get(primary.key) for row in rows}
+    if primary.background_class not in values:
         raise ValueError(
-            f"No {BACKGROUND!r} folder found in {dataset.inner.root}. The model needs "
-            "diverse non-seaweed images to avoid false positives — add a Background class."
+            f"No {primary.background_class!r} (background) sample found in the {split_name!r} split "
+            f"for measurement {primary.key!r}. The model needs diverse non-subject images to avoid "
+            "false positives."
         )
 
 
-def get_dataloaders(cfg: Config) -> Dataloaders:
-    train_ds = SeaweedDataset(cfg.train_dir, cfg, train=True)
-    val_ds = SeaweedDataset(cfg.val_dir, cfg, train=False)
-    test_ds = SeaweedDataset(cfg.test_dir, cfg, train=False)
+def get_dataloaders(cfg: Config, schema: Schema) -> Dataloaders:
+    train_ds = AnnotatedDataset(cfg.train_dir, cfg, schema, train=True)
+    val_ds = AnnotatedDataset(cfg.val_dir, cfg, schema, train=False)
+    test_ds = AnnotatedDataset(cfg.test_dir, cfg, schema, train=False)
 
-    for ds in (train_ds, val_ds, test_ds):
-        _verify_dataset(ds)
+    _verify_dataset(train_ds.rows, schema, "train")
+    _verify_dataset(val_ds.rows, schema, "validation")
+    _verify_dataset(test_ds.rows, schema, "test")
+
+    collate = build_collate(schema)
 
     train_loader = DataLoader(
         train_ds,
@@ -107,7 +130,7 @@ def get_dataloaders(cfg: Config) -> Dataloaders:
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
-        collate_fn=_collate,
+        collate_fn=collate,
     )
     val_loader = DataLoader(
         val_ds,
@@ -115,7 +138,7 @@ def get_dataloaders(cfg: Config) -> Dataloaders:
         shuffle=False,
         num_workers=cfg.num_workers,
         pin_memory=True,
-        collate_fn=_collate,
+        collate_fn=collate,
     )
     test_loader = DataLoader(
         test_ds,
@@ -123,16 +146,7 @@ def get_dataloaders(cfg: Config) -> Dataloaders:
         shuffle=False,
         num_workers=cfg.num_workers,
         pin_memory=True,
-        collate_fn=_collate,
+        collate_fn=collate,
     )
 
-    return Dataloaders(
-        train=train_loader,
-        val=val_loader,
-        test=test_loader,
-        # Authoritative, fixed order from config (persisted into checkpoints) —
-        # NOT ImageFolder's alphabetical folder order, which the multi-head
-        # targets deliberately don't depend on.
-        condition_classes=list(cfg.condition_classes),
-        subtype_classes=list(cfg.disease_subtypes),
-    )
+    return Dataloaders(train=train_loader, val=val_loader, test=test_loader, schema=schema)
