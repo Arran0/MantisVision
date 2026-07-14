@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import config  # noqa: E402
 from src.data.transforms import build_transforms  # noqa: E402
 from src.models.efficientnet import (  # noqa: E402
-    ConditionLogitsWrapper,
+    ClassificationLogitsWrapper,
     last_conv_layer,
     load_checkpoint,
 )
@@ -31,14 +31,16 @@ from src.utils.seed import get_device  # noqa: E402
 def generate_gradcam(
     model: torch.nn.Module,
     image: Image.Image,
+    measurement_key: str,
     class_index: int,
     device: torch.device,
 ) -> np.ndarray:
     """Returns an RGB uint8 heatmap-overlaid image (H, W, 3), values 0-255.
 
-    `class_index` is a condition-head class index; Grad-CAM runs against the
-    condition logits (via ConditionLogitsWrapper) since the multi-head model's
-    forward returns a dict, which pytorch-grad-cam can't target directly.
+    `class_index` is a class index within `measurement_key`'s classification
+    head; Grad-CAM runs against that head's logits (via
+    ClassificationLogitsWrapper) since the multi-head model's forward returns
+    a dict, which pytorch-grad-cam can't target directly.
     """
     # Imported here (not at module load) so the API can import this module
     # without pulling in the pytorch-grad-cam / OpenCV stack unless a heatmap
@@ -53,7 +55,7 @@ def generate_gradcam(
     resized = image.convert("RGB").resize((config.image_size, config.image_size))
     rgb_float = np.array(resized).astype(np.float32) / 255.0
 
-    cam_model = ConditionLogitsWrapper(model)
+    cam_model = ClassificationLogitsWrapper(model, measurement_key)
     target_layers = [last_conv_layer(model)]
     cam = GradCAM(model=cam_model, target_layers=target_layers)
     grayscale_cam = cam(input_tensor=input_tensor, targets=[ClassifierOutputTarget(class_index)])[0]
@@ -68,9 +70,10 @@ def main() -> None:
         sys.exit(1)
 
     device = get_device(config.device)
-    model, condition_classes, _subtypes, _species = load_checkpoint(
-        config.checkpoints_dir / "best_model.pt", device
-    )
+    model, schema = load_checkpoint(config.checkpoints_dir / "best_model.pt", device)
+    primary = schema.primary_classification()
+    if primary is None:
+        raise SystemExit("This checkpoint's schema has no classification measurement to run Grad-CAM against.")
 
     image = Image.open(sys.argv[1])
     transform = build_transforms(config, train=False)
@@ -78,11 +81,11 @@ def main() -> None:
 
     with torch.no_grad():
         outputs = model(input_tensor)
-        predicted_idx = int(outputs["condition"].argmax(dim=1).item())
+        predicted_idx = int(outputs[primary.key].argmax(dim=1).item())
 
-    print(f"Predicted condition: {condition_classes[predicted_idx]}")
+    print(f"Predicted {primary.label}: {primary.classes[predicted_idx].name}")
 
-    overlay = generate_gradcam(model, image, predicted_idx, device)
+    overlay = generate_gradcam(model, image, primary.key, predicted_idx, device)
     out_path = Path(sys.argv[1]).with_suffix(".gradcam.png")
     Image.fromarray(overlay).save(out_path)
     print(f"Saved heatmap -> {out_path}")

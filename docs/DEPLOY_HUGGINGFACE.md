@@ -34,6 +34,11 @@ same URL works here.)
 4. Once created, go to the Space's **Settings** tab and add these
    **Repository secrets**:
    - `MODEL_URL` = the direct download URL from step 1.
+   - `RELOAD_TOKEN` = a long random secret (e.g. `openssl rand -hex 32`).
+     Enables zero-downtime model promotion: the admin "Promote" button calls
+     `POST /admin/reload` on the Space with this as a bearer token to hot-swap
+     the live model. Set the **same** value as `ML_API_ADMIN_TOKEN` in the
+     Vercel web app's env (step 5). With it unset, `/admin/reload` returns 503.
    - `WEB_APP_ORIGIN` = your Vercel app's origin (e.g.
      `https://mantis-vision.vercel.app`) — locks CORS down to just your PWA.
    - `ENABLE_GRADCAM` = `true` (optional — safe to enable here since 16 GB
@@ -77,15 +82,26 @@ curl -F "file=@/path/to/photo.jpg" https://<username>-<space-name>.hf.space/pred
 In the Vercel project (`apps/web`) -> **Settings -> Environment Variables**:
 
 - `ML_API_URL` = `https://<username>-<space-name>.hf.space`
+- `ML_API_ADMIN_TOKEN` = the **same** value you set for `RELOAD_TOKEN` in the
+  Space's secrets (step 2.4). This is what lets the "Promote" button hot-swap
+  the model.
 
 Redeploy the Vercel project for the env var change to take effect.
 
 ## 6. Updating the model later
 
-Re-training produces a new `best_model.pt`. Upload it as a new GitHub
-Release asset, update the Space's `MODEL_URL` secret to the new URL, and
-restart the Space (**Settings -> Factory reboot**, or just push any change
-to `ml/`) — it re-downloads on the next boot.
+Re-training produces a new `best_model.pt`, published as a GitHub Release
+asset by the retrain workflow. Promotion is now fully automatic: in the admin
+panel, review a completed run and click **Promote**. The web app calls
+`POST /admin/reload` on the Space, which downloads the new checkpoint,
+verifies it loads, and hot-swaps the live model **with no factory reboot and
+no secret edits**. If the download or load fails, the previous model keeps
+serving and the error is surfaced in the admin panel.
+
+You no longer need to edit the `MODEL_URL` secret or reboot the Space to
+update the model. (`MODEL_URL` is still used for the first cold boot; after
+that, promotion also rewrites the on-disk checkpoint so a later reboot serves
+the most recently promoted version.)
 
 ## Notes
 

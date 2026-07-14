@@ -13,5 +13,7 @@ python-multipart>=0.0.9
 pydantic>=2.6
 onnx>=1.16
 onnxruntime>=1.17
+onnxscript>=0.1
 tqdm>=4.66
 kaggle>=1.6
+pytest>=8.0

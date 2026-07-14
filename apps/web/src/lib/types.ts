@@ -20,12 +20,10 @@ export interface TrainingImage {
   createdBy: string | null;
   species: string | null;
   colour: string | null;
-  condition: string;
-  severity: string | null;
-  subtype: string | null;
-  diseaseName: string | null;
+  // Per-image measurement values keyed by measurement key (class name string,
+  // numeric value, or — for a segmentation measurement — a mask storage path).
+  measurements: Record<string, string | number>;
   notes: string | null;
-  farm: string | null;
   status: string;
   thumbnailUrl: string | null;
 }

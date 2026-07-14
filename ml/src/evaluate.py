@@ -1,10 +1,12 @@
 """Evaluate the best multi-head checkpoint on the held-out test split.
 
-Reports, per head:
-  - condition: accuracy, precision/recall/F1 (macro + per-class), confusion
-    matrix image, one-vs-rest ROC AUC (incl. the Background class)
-  - disease_subtype: classification report on the Disease subset only
-  - health_score / dried_extent / decayed_extent: mean absolute error (0-100)
+Reports, per measurement:
+  - classification: accuracy, precision/recall/F1 (macro + per-class),
+    confusion matrix image (the schema's primary classification only), and
+    one-vs-rest ROC AUC
+  - regression: mean absolute error, on the samples where it applies
+  - segmentation: mean IoU per mask class, on the samples with a ground-truth
+    mask
 
 Per spec: never judge the model on accuracy alone.
 
@@ -29,7 +31,7 @@ from sklearn.metrics import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import config  # noqa: E402
+from config import Config, Schema, config as _default_config  # noqa: E402
 from src.data.dataset import get_dataloaders  # noqa: E402
 from src.models.efficientnet import load_checkpoint  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
@@ -43,119 +45,158 @@ def _mae(pred: list[float], target: list[float], mask: list[float]) -> float | N
     return float(np.mean([abs(p - t) for p, t in pairs]))
 
 
-def evaluate(checkpoint_path: Path | None = None) -> dict:
-    set_seed(config.seed)
-    device = get_device(config.device)
-    logger = get_logger("evaluate", config.logs_dir)
+def _mean_iou(pred_masks: list[np.ndarray], target_masks: list[np.ndarray], num_classes: int) -> dict[str, float] | None:
+    if not pred_masks:
+        return None
+    ious_per_class: dict[int, list[float]] = {c: [] for c in range(num_classes)}
+    for pred, target in zip(pred_masks, target_masks):
+        for c in range(num_classes):
+            pred_c = pred == c
+            target_c = target == c
+            union = np.logical_or(pred_c, target_c).sum()
+            if union == 0:
+                continue
+            intersection = np.logical_and(pred_c, target_c).sum()
+            ious_per_class[c].append(float(intersection) / float(union))
+    return {str(c): (float(np.mean(v)) if v else None) for c, v in ious_per_class.items()}
 
-    checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
-    model, condition_classes, subtype_classes, _species = load_checkpoint(checkpoint_path, device)
-    logger.info("Loaded checkpoint %s (conditions=%s)", checkpoint_path, condition_classes)
 
-    data = get_dataloaders(config)
-    assert data.condition_classes == condition_classes, "Checkpoint condition order != dataset."
+def evaluate(checkpoint_path: Path | None = None, cfg: Config | None = None) -> dict:
+    cfg = cfg if cfg is not None else _default_config
+    set_seed(cfg.seed)
+    device = get_device(cfg.device)
+    logger = get_logger("evaluate", cfg.logs_dir)
 
-    cond_labels, cond_preds, cond_probs = [], [], []
-    sub_labels, sub_preds = [], []
-    reg = {name: {"pred": [], "target": [], "mask": []} for name in ("health_score", "dried_extent", "decayed_extent")}
+    checkpoint_path = checkpoint_path or (cfg.checkpoints_dir / "best_model.pt")
+    model, schema = load_checkpoint(checkpoint_path, device)
+    logger.info("Loaded checkpoint %s (measurements=%s)", checkpoint_path, [m.key for m in schema.measurements])
+
+    data = get_dataloaders(cfg, schema)
+
+    results: dict = {}
+
+    primary = schema.primary_classification()
 
     with torch.no_grad():
+        per_measurement_state: dict[str, dict] = {
+            m.key: (
+                {"labels": [], "preds": [], "probs": []}
+                if m.type == "classification"
+                else {"pred": [], "target": [], "mask": []}
+                if m.type == "regression"
+                else {"pred_masks": [], "target_masks": []}
+            )
+            for m in schema.measurements
+        }
+
         for images, targets in data.test:
             images = images.to(device)
             outputs = model(images)
 
-            probs = F.softmax(outputs["condition"], dim=1).cpu().numpy()
-            cond_probs.extend(probs.tolist())
-            cond_preds.extend(probs.argmax(axis=1).tolist())
-            cond_labels.extend(targets["condition_id"].numpy().tolist())
+            for m in schema.measurements:
+                state = per_measurement_state[m.key]
+                if m.type == "classification":
+                    mask = targets[f"{m.key}_mask"].numpy()
+                    probs = F.softmax(outputs[m.key], dim=1).cpu().numpy()
+                    preds = probs.argmax(axis=1)
+                    ids = targets[f"{m.key}_id"].numpy()
+                    for keep, p, t, prob in zip(mask > 0.5, preds, ids, probs):
+                        if keep:
+                            state["preds"].append(int(p))
+                            state["labels"].append(int(t))
+                            state["probs"].append(prob.tolist())
+                elif m.type == "regression":
+                    state["pred"].extend(outputs[m.key].cpu().numpy().tolist())
+                    state["target"].extend(targets[m.key].numpy().tolist())
+                    state["mask"].extend(targets[f"{m.key}_mask"].numpy().tolist())
+                elif m.type == "segmentation":
+                    seg_mask = targets[f"{m.key}_seg_mask"].numpy()
+                    pred_classes = outputs[m.key].argmax(dim=1).cpu().numpy()
+                    target_classes = targets[f"{m.key}_seg"].numpy()
+                    for keep, p, t in zip(seg_mask > 0.5, pred_classes, target_classes):
+                        if keep:
+                            state["pred_masks"].append(p)
+                            state["target_masks"].append(t)
 
-            sub_mask = targets["subtype_mask"].numpy()
-            sub_pred_batch = outputs["disease_subtype"].argmax(1).cpu().numpy()
-            sub_target_batch = targets["subtype_id"].numpy()
-            for m, p, t in zip(sub_mask, sub_pred_batch, sub_target_batch):
-                if m > 0.5:
-                    sub_preds.append(int(p))
-                    sub_labels.append(int(t))
+    for m in schema.measurements:
+        state = per_measurement_state[m.key]
 
-            for name in reg:
-                reg[name]["pred"].extend(outputs[name].cpu().numpy().tolist())
-                reg[name]["target"].extend(targets[name].numpy().tolist())
-            reg["health_score"]["mask"].extend(targets["health_mask"].numpy().tolist())
-            reg["dried_extent"]["mask"].extend(targets["extent_mask"].numpy().tolist())
-            reg["decayed_extent"]["mask"].extend(targets["extent_mask"].numpy().tolist())
+        if m.type == "classification":
+            class_names = m.class_names()
+            if not state["labels"]:
+                results[m.key] = None
+                continue
+            labels_arr = np.array(state["labels"])
+            preds_arr = np.array(state["preds"])
+            probs_arr = np.array(state["probs"])
 
-    cond_labels_arr = np.array(cond_labels)
-    cond_preds_arr = np.array(cond_preds)
-    cond_probs_arr = np.array(cond_probs)
+            report = classification_report(
+                labels_arr, preds_arr, labels=list(range(len(class_names))),
+                target_names=class_names, output_dict=True, zero_division=0,
+            )
+            logger.info(
+                "[%s]\n%s",
+                m.key,
+                classification_report(labels_arr, preds_arr, labels=list(range(len(class_names))), target_names=class_names, zero_division=0),
+            )
 
-    report = classification_report(
-        cond_labels_arr, cond_preds_arr, target_names=condition_classes, output_dict=True, zero_division=0
-    )
-    logger.info(
-        "\n%s",
-        classification_report(cond_labels_arr, cond_preds_arr, target_names=condition_classes, zero_division=0),
-    )
+            cm = confusion_matrix(labels_arr, preds_arr, labels=list(range(len(class_names))))
+            per_class_accuracy = {
+                name: float(cm[i, i] / cm[i].sum()) if cm[i].sum() else 0.0 for i, name in enumerate(class_names)
+            }
 
-    cm = confusion_matrix(cond_labels_arr, cond_preds_arr, labels=list(range(len(condition_classes))))
-    per_class_accuracy = {
-        name: float(cm[i, i] / cm[i].sum()) if cm[i].sum() else 0.0
-        for i, name in enumerate(condition_classes)
-    }
+            roc_auc: dict[str, float] = {}
+            try:
+                auc_scores = roc_auc_score(
+                    labels_arr, probs_arr, multi_class="ovr", average=None, labels=list(range(len(class_names)))
+                )
+                roc_auc = {class_names[i]: float(score) for i, score in enumerate(auc_scores)}
+            except ValueError as e:
+                logger.warning("[%s] Could not compute ROC AUC (likely a class missing from the test split): %s", m.key, e)
 
-    roc_auc: dict[str, float] = {}
-    try:
-        auc_scores = roc_auc_score(
-            cond_labels_arr, cond_probs_arr, multi_class="ovr", average=None, labels=list(range(len(condition_classes)))
-        )
-        roc_auc = {condition_classes[i]: float(score) for i, score in enumerate(auc_scores)}
-    except ValueError as e:
-        logger.warning("Could not compute ROC AUC (likely a class missing from the test split): %s", e)
+            cm_path = None
+            if m is primary:
+                # Only the primary classification gets a confusion-matrix
+                # image — the others (e.g. disease_subtype) are reported as
+                # plain classification_report dicts.
+                cfg.reports_dir.mkdir(parents=True, exist_ok=True)
+                fig, ax = plt.subplots(figsize=(8, 7))
+                ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names).plot(
+                    ax=ax, cmap="Blues", xticks_rotation=45
+                )
+                plt.tight_layout()
+                cm_path = cfg.reports_dir / "confusion_matrix.png"
+                fig.savefig(cm_path, dpi=150)
+                plt.close(fig)
 
-    config.reports_dir.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 7))
-    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=condition_classes).plot(
-        ax=ax, cmap="Blues", xticks_rotation=45
-    )
-    plt.tight_layout()
-    cm_path = config.reports_dir / "confusion_matrix.png"
-    fig.savefig(cm_path, dpi=150)
-    plt.close(fig)
+            results[m.key] = {
+                "accuracy": report["accuracy"],
+                "macro_avg": report["macro avg"],
+                "weighted_avg": report["weighted avg"],
+                "per_class": {
+                    name: {
+                        "precision": report[name]["precision"],
+                        "recall": report[name]["recall"],
+                        "f1_score": report[name]["f1-score"],
+                        "support": report[name]["support"],
+                        "accuracy": per_class_accuracy[name],
+                        "roc_auc": roc_auc.get(name),
+                    }
+                    for name in class_names
+                },
+                "confusion_matrix_path": str(cm_path) if cm_path else None,
+            }
 
-    subtype_report = None
-    if sub_labels:
-        subtype_report = classification_report(
-            np.array(sub_labels), np.array(sub_preds), labels=list(range(len(subtype_classes))),
-            target_names=subtype_classes, output_dict=True, zero_division=0,
-        )
+        elif m.type == "regression":
+            results[m.key] = {"mae": _mae(state["pred"], state["target"], state["mask"])}
 
-    results = {
-        "condition": {
-            "accuracy": report["accuracy"],
-            "macro_avg": report["macro avg"],
-            "weighted_avg": report["weighted avg"],
-            "per_class": {
-                name: {
-                    "precision": report[name]["precision"],
-                    "recall": report[name]["recall"],
-                    "f1_score": report[name]["f1-score"],
-                    "support": report[name]["support"],
-                    "accuracy": per_class_accuracy[name],
-                    "roc_auc": roc_auc.get(name),
-                }
-                for name in condition_classes
-            },
-            "confusion_matrix_path": str(cm_path),
-        },
-        "disease_subtype": subtype_report,
-        "regression_mae": {
-            name: _mae(reg[name]["pred"], reg[name]["target"], reg[name]["mask"]) for name in reg
-        },
-    }
+        elif m.type == "segmentation":
+            results[m.key] = {"mean_iou_per_class": _mean_iou(state["pred_masks"], state["target_masks"], len(m.seg_classes))}
 
-    results_path = config.reports_dir / "evaluation_results.json"
+    results_path = cfg.reports_dir / "evaluation_results.json"
+    cfg.reports_dir.mkdir(parents=True, exist_ok=True)
     results_path.write_text(json.dumps(results, indent=2))
     logger.info("Saved evaluation results -> %s", results_path)
-    logger.info("Saved confusion matrix -> %s", cm_path)
 
     return results
 
