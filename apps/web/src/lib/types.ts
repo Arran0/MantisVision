@@ -24,7 +24,6 @@ export interface TrainingImage {
   // numeric value, or — for a segmentation measurement — a mask storage path).
   measurements: Record<string, string | number>;
   notes: string | null;
-  farm: string | null;
   status: string;
   thumbnailUrl: string | null;
 }

@@ -37,21 +37,18 @@ ENABLE_GRADCAM = os.environ.get("ENABLE_GRADCAM", "false").lower() in ("1", "tru
 # backward pass) but still add response payload size; opt-in like Grad-CAM.
 ENABLE_SEGMENTATION_OVERLAY = os.environ.get("ENABLE_SEGMENTATION_OVERLAY", "false").lower() in ("1", "true", "yes")
 
-# Bucketing a regressed health_score into a coarse Healthy/Moderate/Low
-# display level is legacy, PWA-facing convenience tied to today's condition
-# vocabulary (Healthy/Decay/Dried/Disease) — the schema has no generic notion
-# of "which classes get severity-bucketed", so this stays keyed to those
-# specific names rather than fully generalized. An admin-renamed or novel
-# condition class simply gets no derived level (None), which is a graceful
-# degrade, not a crash.
-def _derive_level(condition: str, health_score: float, disease_moderate_min: float) -> str | None:
-    if condition == "Healthy":
+# Bucketing the regressed health_score into a coarse Healthy/Moderate/Low
+# display level for the PWA — purely score-based against the schema's two
+# thresholds, uniformly for any non-background subject. No condition/class
+# name is special-cased: an admin-renamed or brand-new condition gets the
+# same treatment as any other, since the level is a property of the score,
+# not of which class was predicted.
+def _derive_level(health_score: float, moderate_min: float, healthy_min: float) -> str:
+    if health_score >= healthy_min:
         return "Healthy"
-    if condition in ("Decay", "Dried"):
-        return "Low"
-    if condition == "Disease":
-        return "Moderate" if health_score >= disease_moderate_min else "Low"
-    return None
+    if health_score >= moderate_min:
+        return "Moderate"
+    return "Low"
 
 
 @dataclass
@@ -230,7 +227,7 @@ class Predictor:
 
         health_score_value = health_result.value if health_result and isinstance(health_result.value, (int, float)) else None
         level = (
-            _derive_level(condition_name, health_score_value, schema.disease_moderate_min)
+            _derive_level(health_score_value, schema.health_moderate_min, schema.health_healthy_min)
             if health_score_value is not None
             else None
         )

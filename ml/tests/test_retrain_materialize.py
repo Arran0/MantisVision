@@ -24,7 +24,8 @@ from src.data.dataset import AnnotatedDataset
 SCHEMA_DOC = {
     "species": [{"name": "Kappaphycus alvarezii", "slug": "Kappaphycus_alvarezii"}],
     "active_species_slug": "Kappaphycus_alvarezii",
-    "disease_moderate_min": 45.0,
+    "health_moderate_min": 45.0,
+    "health_healthy_min": 75.0,
     "measurements": [
         {
             "key": "condition",

@@ -15,13 +15,6 @@ create table training_images (
   colour text,
   health text not null check (health in ('Healthy', 'Moderate', 'Low', 'Decay', 'Dried', 'Disease')),
   notes text,
-  farm text,
-  gps point,
-  water_temperature_c numeric,
-  salinity_ppt numeric,
-  depth_m numeric,
-  camera text,
-  captured_at timestamptz,
   split text check (split in ('train', 'validation', 'test')),
   status text not null default 'labeled' check (status in ('labeled', 'used_in_training', 'rejected'))
 );

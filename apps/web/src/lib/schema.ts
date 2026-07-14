@@ -70,11 +70,13 @@ export interface MeasurementDef {
 export interface SchemaDoc {
   species: SpeciesDef[];
   active_species_slug: string;
-  // A regression-derived display threshold: a classification predicted as
-  // "Disease" (or whichever class conventionally carries a Moderate/Low
-  // split) shows as "Moderate" when health_score is at or above this, else
-  // "Low". Kept as a single scalar for now — see ml/src/inference/predictor.py.
-  disease_moderate_min: number;
+  // Display-level thresholds applied uniformly to health_score for any
+  // non-background subject (see ml/src/inference/predictor.py): at or above
+  // health_healthy_min -> "Healthy"; at or above health_moderate_min (but
+  // below healthy) -> "Moderate"; otherwise "Low". No condition/class name is
+  // special-cased — the two cutoffs are the whole rule.
+  health_moderate_min: number;
+  health_healthy_min: number;
   measurements: MeasurementDef[];
 }
 
@@ -82,7 +84,8 @@ export interface SchemaDoc {
 export const DEFAULT_SCHEMA: SchemaDoc = {
   species: [{ name: "Kappaphycus alvarezii", slug: "Kappaphycus_alvarezii" }],
   active_species_slug: "Kappaphycus_alvarezii",
-  disease_moderate_min: 45.0,
+  health_moderate_min: 45.0,
+  health_healthy_min: 75.0,
   measurements: [
     {
       key: "condition",
@@ -226,6 +229,27 @@ export function isValueValidForMeasurement(measurement: MeasurementDef, value: u
   return false;
 }
 
+// --- Slug/key derivation -----------------------------------------------------
+// Measurement keys and species slugs are stable identifiers threaded through
+// the DB, the JSON schema, and the Python/ML pipeline — not something an
+// admin should hand-type. The editor derives them from the human-readable
+// label/name instead; these are exported so it (and validation) agree on the
+// exact same derivation.
+
+export function slugifyKey(label: string): string {
+  const slug = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || "measurement";
+}
+
+export function slugifySlug(name: string): string {
+  const slug = name.trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return slug || "species";
+}
+
 // --- Validation ------------------------------------------------------------
 
 const SLUG_RE = /^[A-Za-z0-9_]+$/;
@@ -255,7 +279,10 @@ export function validateSchema(doc: unknown): string | null {
   if (!t.active_species_slug || !slugs.includes(t.active_species_slug))
     return "active_species_slug must match one of the species.";
 
-  if (!isFraction(t.disease_moderate_min)) return "disease_moderate_min must be a number between 0 and 100.";
+  if (!isFraction(t.health_moderate_min)) return "health_moderate_min must be a number between 0 and 100.";
+  if (!isFraction(t.health_healthy_min)) return "health_healthy_min must be a number between 0 and 100.";
+  if (t.health_healthy_min <= t.health_moderate_min)
+    return "health_healthy_min must be greater than health_moderate_min.";
 
   if (!Array.isArray(t.measurements) || t.measurements.length === 0)
     return "At least one measurement is required.";

@@ -57,7 +57,8 @@ def _schema() -> Schema:
     return Schema(
         species=[SpeciesDef(name="Test species", slug="Test_species")],
         active_species_slug="Test_species",
-        disease_moderate_min=45.0,
+        health_moderate_min=45.0,
+        health_healthy_min=75.0,
         measurements=[condition, disease_subtype, health_score, biofouling],
     )
 
@@ -139,7 +140,7 @@ def test_disease_prediction_surfaces_subtype_and_augments_recommendation(tmp_pat
     predictor = _make_predictor(
         tmp_path, schema,
         class_choice={"condition": "Disease", "disease_subtype": "IceIce"},
-        regression_values={"health_score": 60.0},  # >= disease_moderate_min (45) -> "Moderate"
+        regression_values={"health_score": 60.0},  # >= health_moderate_min (45), < health_healthy_min (75) -> "Moderate"
         seg_class_choice={"biofouling": 0},
     )
 
@@ -159,12 +160,30 @@ def test_disease_prediction_low_health_score_derives_low_level(tmp_path):
     predictor = _make_predictor(
         tmp_path, schema,
         class_choice={"condition": "Disease", "disease_subtype": "Unknown"},
-        regression_values={"health_score": 20.0},  # below disease_moderate_min -> "Low"
+        regression_values={"health_score": 20.0},  # below health_moderate_min -> "Low"
         seg_class_choice={"biofouling": 0},
     )
 
     result = predictor.predict(_fake_image_bytes())
     assert result.health == "Low"
+
+
+def test_level_is_purely_score_based_not_special_cased_by_condition_name(tmp_path):
+    """The level derivation used to hardcode "Disease" as the only condition
+    that could ever show "Moderate", and "Healthy" as the only one that could
+    show "Healthy" — regardless of the actual regressed score. It's now
+    purely a function of health_score against the two thresholds, so a
+    "Disease" prediction with a high enough score shows "Healthy" too."""
+    schema = _schema()
+    predictor = _make_predictor(
+        tmp_path, schema,
+        class_choice={"condition": "Disease", "disease_subtype": "Unknown"},
+        regression_values={"health_score": 90.0},  # >= health_healthy_min (75)
+        seg_class_choice={"biofouling": 0},
+    )
+
+    result = predictor.predict(_fake_image_bytes())
+    assert result.health == "Healthy"
 
 
 def test_background_prediction_masks_everything_and_reports_not_seaweed(tmp_path):

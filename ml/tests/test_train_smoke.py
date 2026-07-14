@@ -53,7 +53,8 @@ def _make_schema() -> Schema:
     return Schema(
         species=[SpeciesDef(name="Kappaphycus alvarezii", slug="Kappaphycus_alvarezii")],
         active_species_slug="Kappaphycus_alvarezii",
-        disease_moderate_min=45.0,
+        health_moderate_min=45.0,
+        health_healthy_min=75.0,
         measurements=[condition, health, biofouling],
     )
 

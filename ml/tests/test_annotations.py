@@ -39,7 +39,8 @@ def _tiny_schema() -> Schema:
     return Schema(
         species=[SpeciesDef(name="Test species", slug="Test_species")],
         active_species_slug="Test_species",
-        disease_moderate_min=45.0,
+        health_moderate_min=45.0,
+        health_healthy_min=75.0,
         measurements=[condition, subtype, health],
     )
 
