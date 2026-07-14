@@ -2,11 +2,10 @@
 evaluation, publish the resulting checkpoint, and report results back into
 the `model_runs` table for an admin to review before promoting.
 
-Orchestrates existing pipeline pieces (src.train, src.evaluate,
-scripts.split_dataset.split_class) rather than reimplementing them, and talks
-to Supabase's PostgREST/Storage HTTP APIs directly via urllib — this repo has
-no Supabase Python SDK dependency, matching the style already used in
-src/api/main.py's checkpoint download.
+Orchestrates existing pipeline pieces (src.train, src.evaluate) rather than
+reimplementing them, and talks to Supabase's PostgREST/Storage HTTP APIs
+directly via urllib — this repo has no Supabase Python SDK dependency,
+matching the style already used in src/api/main.py's checkpoint download.
 
 Invoked by .github/workflows/retrain.yml, itself triggered from the admin
 panel (apps/web/src/app/api/admin/retrain/route.ts). Never run automatically
@@ -36,9 +35,10 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import config  # noqa: E402
+import config as config_module  # noqa: E402
+from config import Schema, config, schema_from_dict  # noqa: E402
+from scripts.export_schema import fetch_active_schema  # noqa: E402
 from scripts.split_dataset import split_class  # noqa: E402
-from src.data.labels import build_class_folder  # noqa: E402
 
 REQUEST_TIMEOUT_S = 60
 
@@ -73,21 +73,21 @@ def update_run(model_run_id: str, **fields) -> None:
 
 
 def fetch_labeled_images() -> list[dict]:
+    # Which measurement keys matter is schema-defined now, not a fixed column
+    # list, so pull the whole `measurements` map per row instead of naming
+    # individual columns.
     result = _supabase_request(
         "GET",
         "training_images",
-        params=(
-            "?status=eq.labeled"
-            "&select=id,storage_path,condition,severity,subtype,disease_name"
-        ),
+        params="?status=eq.labeled&select=id,storage_path,measurements",
     )
     return result or []
 
 
-def download_storage_object(storage_path: str, dest: Path) -> None:
+def download_storage_object(bucket: str, storage_path: str, dest: Path) -> None:
     url, key = _supabase_env()
     request = urllib.request.Request(
-        f"{url}/storage/v1/object/training-images/{storage_path}",
+        f"{url}/storage/v1/object/{bucket}/{storage_path}",
         headers={"apikey": key, "Authorization": f"Bearer {key}"},
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +99,13 @@ def maybe_pull_kaggle_archive() -> None:
     # Best-effort: the durable dataset archive is a nice-to-have base to
     # train on top of, but a missing/misconfigured archive shouldn't block
     # retraining on the newly labeled images alone.
+    #
+    # NOTE: a Kaggle archive is assumed to already be laid out as
+    # images/ + masks/<key>/ + annotations.jsonl per split (the same
+    # manifest convention src.data.dataset.AnnotatedDataset reads) — the old
+    # class-folder convention this repo used before the measurement schema
+    # existed is no longer understood by the training pipeline. Publish any
+    # archive in the new layout going forward.
     dataset_id = os.environ.get("KAGGLE_DATASET")
     if not dataset_id or not os.environ.get("KAGGLE_USERNAME") or not os.environ.get("KAGGLE_KEY"):
         print("Skipping Kaggle archive pull (KAGGLE_DATASET/KAGGLE_USERNAME/KAGGLE_KEY not fully set).")
@@ -115,42 +122,67 @@ def maybe_pull_kaggle_archive() -> None:
         print(f"Could not pull Kaggle archive ({e}); continuing with newly labeled images only.")
 
 
-def materialize_new_labels(images: list[dict], raw_dir: Path) -> int:
-    """Download each labeled row and stage it under its canonical class folder
-    (built from condition/severity/subtype/disease_name via the shared
-    labels.build_class_folder), then split each class into train/val/test."""
-    by_class: dict[str, list[Path]] = {}
+def materialize_new_labels(images: list[dict], schema: Schema, raw_dir: Path) -> int:
+    """Downloads each labeled row's photo (and any segmentation mask files
+    its measurements reference) into a flat staging area, splits the ROWS
+    (not folders — there are no class folders anymore) into train/
+    validation/test, and appends each split's images/masks/annotations.jsonl.
+    A value missing from a row's `measurements` map simply isn't written into
+    that row's manifest entry — src.data.annotations.derive_targets treats an
+    absent key as "no ground truth yet" and masks it out of that head's loss,
+    it does not fabricate a placeholder value."""
+    staged: list[dict] = []
     for image in images:
-        try:
-            class_folder = build_class_folder(
-                condition=image["condition"],
-                severity=image.get("severity"),
-                subtype=image.get("subtype"),
-                disease_name=image.get("disease_name"),
-                species_slug=config.species_slug,
-            )
-        except Exception as e:  # noqa: BLE001 - skip a malformed row, don't abort the run
-            print(f"Skipping training_images row {image['id']}: {e}")
-            continue
+        image_id = image["id"]
+        measurements: dict = image.get("measurements") or {}
         ext = Path(image["storage_path"]).suffix or ".jpg"
-        dest = raw_dir / class_folder / f"{image['id']}{ext}"
-        download_storage_object(image["storage_path"], dest)
-        by_class.setdefault(class_folder, []).append(dest)
+        filename = f"{image_id}{ext}"
+        download_storage_object("training-images", image["storage_path"], raw_dir / "images" / filename)
+
+        row_measurements: dict = {}
+        row_masks: dict = {}
+        for m in schema.measurements:
+            value = measurements.get(m.key)
+            if value is None:
+                continue
+            if m.type == "segmentation":
+                mask_ext = Path(str(value)).suffix or ".png"
+                mask_filename = f"{image_id}{mask_ext}"
+                download_storage_object("training-masks", value, raw_dir / "masks" / m.key / mask_filename)
+                row_masks[m.key] = mask_filename
+            else:
+                row_measurements[m.key] = value
+
+        staged.append({"filename": filename, "measurements": row_measurements, "masks": row_masks})
+
+    # split_class is a plain list splitter despite its class-folder-oriented
+    # name/docstring (scripts/split_dataset.py) — reused here for row dicts.
+    splits = split_class(staged, config.seed)
 
     total = 0
-    for class_folder, files in by_class.items():
-        splits = split_class(sorted(files), config.seed)
-        for split_name, split_files in splits.items():
-            dest_dir = {
-                "train": config.train_dir,
-                "validation": config.val_dir,
-                "test": config.test_dir,
-            }[split_name] / class_folder
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            for f in split_files:
-                f.rename(dest_dir / f.name)
-        total += len(files)
-        print(f"{class_folder}: added {len(files)} newly labeled images.")
+    for split_name, split_rows in splits.items():
+        split_dir = {"train": config.train_dir, "validation": config.val_dir, "test": config.test_dir}[split_name]
+        (split_dir / "images").mkdir(parents=True, exist_ok=True)
+
+        manifest_lines = []
+        for row in split_rows:
+            (raw_dir / "images" / row["filename"]).rename(split_dir / "images" / row["filename"])
+            for key, mask_filename in row["masks"].items():
+                mask_dest_dir = split_dir / "masks" / key
+                mask_dest_dir.mkdir(parents=True, exist_ok=True)
+                (raw_dir / "masks" / key / mask_filename).rename(mask_dest_dir / mask_filename)
+            manifest_lines.append(
+                json.dumps({"filename": row["filename"], "measurements": row["measurements"], "masks": row["masks"]})
+            )
+
+        if manifest_lines:
+            manifest_path = split_dir / "annotations.jsonl"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(manifest_path, "a") as f:
+                f.write("\n".join(manifest_lines) + "\n")
+        total += len(split_rows)
+
+    print(f"Materialized {total} newly labeled images across train/validation/test.")
     return total
 
 
@@ -201,44 +233,38 @@ def main() -> None:
     try:
         update_run(model_run_id, status="running")
 
+        # Fetch the schema this run actually trains on (may differ from
+        # whatever config.SCHEMA held at import time — e.g. an admin edit
+        # since the last export, or a fresh checkout with no schema.json at
+        # all) and make it authoritative for the rest of this process: both
+        # for our own directory-path lookups below (config.dataset_dir reads
+        # config.SCHEMA.active_species_slug) and for train()'s default when
+        # we don't pass one explicitly.
+        schema_doc = fetch_active_schema()
+        schema = schema_from_dict(schema_doc)
+        config_module.SCHEMA = schema
+        config.metadata_dir.mkdir(parents=True, exist_ok=True)
+        with open(config.metadata_dir / "schema.json", "w") as f:
+            json.dump(schema_doc, f, indent=2)
+        print(f"Training with schema: {[m.key for m in schema.measurements]}")
+
         maybe_pull_kaggle_archive()
 
         images = fetch_labeled_images()
         raw_dir = config.dataset_dir / "_incoming"
-        new_count = materialize_new_labels(images, raw_dir)
+        new_count = materialize_new_labels(images, schema, raw_dir)
 
-        # Refresh the human-auditable folder -> integer-ID map from what's now
-        # on disk, so it always reflects the classes this run actually trains on.
-        from scripts.build_label_map import scan_folders
-
-        rows = scan_folders(config.train_dir)
-        (config.metadata_dir / "label_map.csv").parent.mkdir(parents=True, exist_ok=True)
-        with open(config.metadata_dir / "label_map.csv", "w", newline="") as f:
-            import csv
-
-            from scripts.build_label_map import COLUMNS
-
-            writer = csv.DictWriter(f, fieldnames=COLUMNS)
-            writer.writeheader()
-            writer.writerows(rows)
-
-        # The model needs every condition represented in the train split — an
-        # empty condition class would crash training on an empty ImageFolder
-        # class and make the confusion matrix meaningless.
-        from src.data.validate_dataset import condition_counts
-
-        counts = condition_counts(config.train_dir)
-        empty = [name for name, count in counts.items() if count == 0]
-        if empty:
-            raise RuntimeError(
-                f"Cannot train: no training images for condition(s) {empty}. "
-                "Label at least one image per condition (including Background) first."
-            )
+        # Dataset adequacy (e.g. "is there at least one background sample
+        # per split") is now checked inside get_dataloaders (called by
+        # train() below) rather than pre-scanned here — that check is
+        # schema-driven (src.data.dataset._verify_dataset) and raises the
+        # same way a pre-check would, reported to model_runs by the except
+        # block below.
 
         from src.evaluate import evaluate
         from src.train import train
 
-        train()
+        train(schema=schema)
         results = evaluate()
 
         checkpoint_path = config.checkpoints_dir / "best_model.pt"
