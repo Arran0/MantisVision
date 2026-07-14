@@ -22,9 +22,10 @@ from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from config import SPECIES, config  # noqa: E402
+from config import SCHEMA, config  # noqa: E402
 from src.api.schemas import (  # noqa: E402
     HealthCheckResponse,
+    MeasurementResultResponse,
     PredictionResponse,
     ReloadRequest,
     ReloadResponse,
@@ -120,19 +121,21 @@ def health() -> HealthCheckResponse:
     model_loaded = checkpoint_path.exists()
     if model_loaded:
         predictor = get_predictor()
+        schema = predictor.schema
         species = predictor.species_name
-        conditions = predictor.condition_classes
-        subtypes = predictor.subtype_classes
     else:
-        species = SPECIES["name"]
-        conditions = list(config.condition_classes)
-        subtypes = list(config.disease_subtypes)
+        # No checkpoint yet — report the active schema's own species/
+        # measurements so /health is still informative before first load.
+        schema = SCHEMA
+        species = (
+            next((s.name for s in schema.species if s.slug == schema.active_species_slug), None)
+            or (schema.species[0].name if schema.species else "Unknown species")
+        )
     return HealthCheckResponse(
         status="ok",
         model_loaded=model_loaded,
         species=species,
-        conditions=conditions,
-        disease_subtypes=subtypes,
+        measurements=[m.key for m in schema.measurements],
     )
 
 
@@ -158,6 +161,18 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
         explanation=result.explanation,
         recommendation=result.recommendation,
         gradcam_png_base64=result.gradcam_base64_png,
+        measurements={
+            key: MeasurementResultResponse(
+                type=m.type,
+                value=m.value,
+                confidence=m.confidence,
+                explanation=m.explanation,
+                recommendation=m.recommendation,
+                coverage=m.coverage,
+                mask_png_base64=m.mask_png_base64,
+            )
+            for key, m in result.measurements.items()
+        },
     )
 
 
@@ -215,6 +230,5 @@ def reload_model(
         status="ok",
         model_loaded=True,
         species=new_predictor.species_name,
-        conditions=new_predictor.condition_classes,
-        disease_subtypes=new_predictor.subtype_classes,
+        measurements=[m.key for m in new_predictor.schema.measurements],
     )
