@@ -97,3 +97,24 @@ def test_get_dataloaders_raises_clear_error_instead_of_zero_division_on_empty_tr
 
     with pytest.raises(ValueError, match="'train' split has no images"):
         get_dataloaders(cfg, schema)
+
+
+def test_train_loader_yields_a_batch_when_split_is_smaller_than_batch_size(tmp_path):
+    """A second, more common way to hit the same crash: a train split with a
+    handful of rows (non-empty, so _verify_dataset passes) but fewer rows
+    than batch_size. train_loader's old unconditional drop_last=True dropped
+    that one uneven batch entirely, so DataLoader iterated zero times and
+    run_epoch's `total_loss / total` still raised ZeroDivisionError. Now
+    drop_last only applies once there's more than one full batch to spare."""
+    schema = _schema_without_background()
+    dataset_root = tmp_path / "dataset"
+
+    three_rows = [(f"train{i}.jpg", {"seaweed_presence": "Yes"}) for i in range(3)]
+    _write_split(dataset_root / "train", three_rows)
+    _write_split(dataset_root / "validation", [("v1.jpg", {"seaweed_presence": "Yes"})])
+    _write_split(dataset_root / "test", [("t1.jpg", {"seaweed_presence": "Yes"})])
+
+    cfg = Config(dataset_root=dataset_root, image_size=IMAGE_SIZE, batch_size=32, num_workers=0, device="cpu")
+
+    dataloaders = get_dataloaders(cfg, schema)
+    assert len(list(dataloaders.train)) > 0

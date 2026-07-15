@@ -141,7 +141,13 @@ def get_dataloaders(cfg: Config, schema: Schema) -> Dataloaders:
         shuffle=True,
         num_workers=cfg.num_workers,
         pin_memory=True,
-        drop_last=True,
+        # Only drop the last (uneven) batch when there's at least one full
+        # batch to fall back on. With a small labeled dataset (fewer rows
+        # than batch_size), unconditionally dropping it left the train
+        # split with zero batches — DataLoader iterated 0 times and
+        # run_epoch's `total_loss / total` crashed with ZeroDivisionError
+        # even though _verify_dataset had confirmed the split wasn't empty.
+        drop_last=len(train_ds) > cfg.batch_size,
         collate_fn=collate,
     )
     val_loader = DataLoader(
