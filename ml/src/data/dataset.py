@@ -96,6 +96,18 @@ def build_collate(schema: Schema):
 
 
 def _verify_dataset(rows: list[AnnotationRow], schema: Schema, split_name: str) -> None:
+    # An empty split (typical with only a handful of labeled images: the
+    # fixed 70/15/15 split in scripts/split_dataset.py can round a small
+    # pool down to zero for a given split) would otherwise reach
+    # train.py's run_epoch and crash on `total_loss / total` with an opaque
+    # ZeroDivisionError. Catch it here with an actionable message instead.
+    if not rows:
+        raise ValueError(
+            f"The {split_name!r} split has no images at all. Label more photos via /admin/dataset before "
+            "retraining — with only a few labeled images, the fixed 70/15/15 train/validation/test split "
+            "can leave a split empty."
+        )
+
     # The model needs negatives to train against — the whole point of the N+1
     # design. Only enforced when the schema actually declares a background
     # class (a schema is free not to have one, though the web validator

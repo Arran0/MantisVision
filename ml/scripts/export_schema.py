@@ -37,8 +37,12 @@ def fetch_active_schema() -> dict:
     unlike the Kaggle archive pull, a schema fetch failure means we can't be
     sure what the model should train on, so the caller should abort the run
     rather than silently training on a possibly-wrong fallback."""
-    url = os.environ["SUPABASE_URL"].rstrip("/")
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    # .strip() guards against a stray trailing newline/whitespace in the
+    # secret value (e.g. from a copy-paste into the GitHub secret field) —
+    # that would otherwise reach http.client as a literal "\n" in the
+    # Authorization header value and raise "Invalid header value".
+    url = os.environ["SUPABASE_URL"].strip().rstrip("/")
+    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"].strip()
     request = urllib.request.Request(
         f"{url}/rest/v1/measurement_schema?select=doc&order=created_at.desc&limit=1",
         headers={"apikey": key, "Authorization": f"Bearer {key}"},
