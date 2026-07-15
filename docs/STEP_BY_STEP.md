@@ -37,9 +37,10 @@ Already done in this repo:
 
 - [x] Repository structure (`apps/web`, `ml`, `docs`)
 - [x] Python environment defined (`ml/requirements.txt`)
-- [x] Dataset split structure (`ml/dataset/<species_slug>/{train,validation,test}/`,
-      each holding `images/`, `masks/<measurement_key>/`, and an
-      `annotations.jsonl` manifest — see Milestone 2)
+- [x] Dataset split structure (`ml/dataset/{train,validation,test}/`, each
+      holding `images/`, `masks/<measurement_key>/`, and an
+      `annotations.jsonl` manifest — see Milestone 2; not species-scoped,
+      species is a per-image classification column like any other)
 - [x] Logging (`ml/src/utils/logger.py`)
 - [x] Reproducibility via fixed seeds (`ml/src/utils/seed.py`, `config.py: seed=42`)
 
@@ -78,8 +79,8 @@ Photo datasets grow large fast and don't belong in git history. The
 retraining pipeline can additionally layer an archived **Kaggle Dataset** in
 underneath the admin-labeled images, synced with `ml/scripts/kaggle_sync.py`.
 `.gitignore` already excludes the actual dataset contents under
-`ml/dataset/<species_slug>/{train,validation,test}/` — only the directory
-structure (`.gitkeep`) is committed.
+`ml/dataset/{train,validation,test}/` — only the directory structure
+(`.gitkeep`) is committed.
 
 **One-time setup:**
 
@@ -97,7 +98,7 @@ structure (`.gitkeep`) is committed.
 A split directory that `kaggle_sync.py` pushes/pulls looks like:
 
 ```
-ml/dataset/<species_slug>/
+ml/dataset/
   train/       images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
   validation/  images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
   test/        images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
@@ -272,9 +273,10 @@ uvicorn src.api.main:app --reload --port 8000
 
 Endpoints:
 
-- `GET /health` → `{status, model_loaded, species, measurements}` (the last
-  is the list of measurement keys the currently-loaded checkpoint's schema
-  defines)
+- `GET /health` → `{status, model_loaded, species_classes, measurements}` —
+  `species_classes` is the full list of species the loaded schema's "species"
+  measurement knows about (not a single "active" one); `measurements` is the
+  list of measurement keys the currently-loaded checkpoint's schema defines
 - `POST /predict` → multipart form with a `file` field, returns a legacy flat
   shape (kept stable for the current PWA) plus a generic, forward-looking
   `measurements` map — one entry per schema measurement:
@@ -312,10 +314,10 @@ Test `/predict` directly:
 curl -F "file=@/path/to/photo.jpg" http://localhost:8000/predict
 ```
 
-The response shape already includes `species` so that real species
-identification (Milestone 7+/long-term) slots in without a breaking change —
-today it's fixed to the schema's single active species because Phase 1
-supports only one.
+`species` in the response is a real predicted classification (the schema's
+"species" measurement), not a fixed constant — the admin adds one class per
+species they collect, extensible like `disease`, with no "active species"
+concept.
 
 ---
 
@@ -437,10 +439,10 @@ Every measurement below can be added the same way `disease_subtype` and
 `health_score` already are — as an entry in the measurement schema — with no
 change to the model, dataset loader, losses, or predictor:
 
-1. **Species Identification** — add a `species` classification measurement
-   (or extend the schema's `species` list + a `species` measurement) once
-   more than one species has labeled data (`Eucheuma denticulatum`,
-   `Gracilaria`, `Ulva`, `Sargassum`).
+1. **Species Identification** — done: `species` is a classification
+   measurement in the default schema, extensible from `/admin/schema` (add a
+   class per species with labeled data, e.g. `Eucheuma_denticulatum`,
+   `Gracilaria`, `Ulva`, `Sargassum`) — no code change needed.
 2. **Predator detection** — a new classification measurement (e.g. keyed
    `predator`, `applies_when condition == "Disease"` or its own trigger),
    outputs e.g. `Rabbitfish`, `Sea Urchin`, `Parrotfish`, `Crab`, `Unknown`.

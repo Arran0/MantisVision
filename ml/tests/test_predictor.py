@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-from config import AppliesWhen, ClassDef, MeasurementDef, SegClassDef, Schema, SpeciesDef
+from config import AppliesWhen, ClassDef, MeasurementDef, SegClassDef, Schema
 from src.inference.predictor import Predictor
 from src.models.efficientnet import build_model, save_checkpoint
 
@@ -35,7 +35,7 @@ def _schema() -> Schema:
         label="Disease subtype",
         type="classification",
         loss_weight=0.5,
-        applies_when=AppliesWhen(key="condition", equals="Disease"),
+        applies_when=[AppliesWhen(key="condition", equals="Disease")],
         classes=[ClassDef(name="IceIce", note="Raise water movement."), ClassDef(name="Unknown", note="Consult a specialist.")],
     )
     health_score = MeasurementDef(
@@ -45,7 +45,7 @@ def _schema() -> Schema:
         loss_weight=1.0,
         min=0.0,
         max=100.0,
-        applies_when=AppliesWhen(key="condition", not_equals="Background"),
+        applies_when=[AppliesWhen(key="condition", not_equals="Background")],
     )
     biofouling = MeasurementDef(
         key="biofouling",
@@ -55,8 +55,6 @@ def _schema() -> Schema:
         seg_classes=[SegClassDef(name="background", color="#000000"), SegClassDef(name="algae", color="#22c55e")],
     )
     return Schema(
-        species=[SpeciesDef(name="Test species", slug="Test_species")],
-        active_species_slug="Test_species",
         health_moderate_min=45.0,
         health_healthy_min=75.0,
         measurements=[condition, disease_subtype, health_score, biofouling],
@@ -226,7 +224,11 @@ def test_segmentation_measurement_reports_coverage(tmp_path):
     assert seg_result.mask_png_base64 == ""  # ENABLE_SEGMENTATION_OVERLAY unset by default
 
 
-def test_predictor_species_name_from_schema(tmp_path):
+def test_predictor_species_falls_back_to_unknown_when_schema_has_no_species_measurement(tmp_path):
+    """Species is a real predicted classification now (see the "species"
+    measurement in DEFAULT_SCHEMA), not a schema-wide constant. A schema
+    without one (like this generic test schema, or a pre-restructure
+    checkpoint) falls back to "Unknown species" rather than erroring."""
     schema = _schema()
     predictor = _make_predictor(
         tmp_path, schema,
@@ -234,4 +236,36 @@ def test_predictor_species_name_from_schema(tmp_path):
         regression_values={"health_score": 80.0},
         seg_class_choice={"biofouling": 0},
     )
-    assert predictor.species_name == "Test species"
+    result = predictor.predict(_fake_image_bytes())
+    assert result.species == "Unknown species"
+
+
+def test_predictor_species_comes_from_its_own_predicted_classification(tmp_path):
+    """When the schema does declare a "species" measurement, `result.species`
+    is that measurement's actual predicted class — not a fixed value, and not
+    tied to any notion of a single "active" species."""
+    presence = MeasurementDef(
+        key="presence",
+        label="Presence",
+        type="classification",
+        loss_weight=1.0,
+        background_class="No",
+        classes=[ClassDef(name="Yes"), ClassDef(name="No")],
+    )
+    species = MeasurementDef(
+        key="species",
+        label="Species",
+        type="classification",
+        loss_weight=1.0,
+        classes=[ClassDef(name="Kappaphycus_alvarezii"), ClassDef(name="Eucheuma_denticulatum")],
+    )
+    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[presence, species])
+
+    predictor = _make_predictor(
+        tmp_path, schema,
+        class_choice={"presence": "Yes", "species": "Eucheuma_denticulatum"},
+        regression_values={},
+        seg_class_choice={},
+    )
+    result = predictor.predict(_fake_image_bytes())
+    assert result.species == "Eucheuma_denticulatum"

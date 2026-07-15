@@ -236,10 +236,8 @@ def main() -> None:
         # Fetch the schema this run actually trains on (may differ from
         # whatever config.SCHEMA held at import time — e.g. an admin edit
         # since the last export, or a fresh checkout with no schema.json at
-        # all) and make it authoritative for the rest of this process: both
-        # for our own directory-path lookups below (config.dataset_dir reads
-        # config.SCHEMA.active_species_slug) and for train()'s default when
-        # we don't pass one explicitly.
+        # all) and make it authoritative for the rest of this process, for
+        # train()'s default when we don't pass one explicitly.
         schema_doc = fetch_active_schema()
         schema = schema_from_dict(schema_doc)
         config_module.SCHEMA = schema

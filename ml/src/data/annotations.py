@@ -2,7 +2,7 @@
 labels (src/data/labels.py's parse_class_folder) as the training pipeline's
 source of truth.
 
-A dataset split directory (dataset/<species_slug>/{train,validation,test}/)
+A dataset split directory (dataset/{train,validation,test}/)
 now holds:
 
     images/<filename>              the photo
@@ -65,17 +65,16 @@ def load_manifest(path: Path) -> list[AnnotationRow]:
 def measurement_applies(measurement: MeasurementDef, values: dict) -> bool:
     """Mirrors Schema.applies / the TS measurementApplies — kept as a free
     function here too since callers often only have a values dict, not a
-    Schema instance, at hand."""
-    cond = measurement.applies_when
-    if cond is None:
-        return True
-    parent_value = values.get(cond.key)
-    if parent_value is None:
-        return False
-    if cond.equals is not None:
-        return parent_value == cond.equals
-    if cond.not_equals is not None:
-        return parent_value != cond.not_equals
+    Schema instance, at hand. Every condition in applies_when must hold
+    (AND); empty/absent means "always applies"."""
+    for cond in measurement.applies_when:
+        parent_value = values.get(cond.key)
+        if parent_value is None:
+            return False
+        if cond.equals is not None and parent_value != cond.equals:
+            return False
+        if cond.not_equals is not None and parent_value == cond.not_equals:
+            return False
     return True
 
 

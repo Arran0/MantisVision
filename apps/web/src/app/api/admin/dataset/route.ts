@@ -109,10 +109,6 @@ export async function POST(request: NextRequest) {
   const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
   const isBackground = !!primary && primaryValue === primary.background_class;
 
-  const activeSpeciesName =
-    schema.species.find((s) => s.slug === schema.active_species_slug)?.name ?? schema.species[0]?.name ?? null;
-  const species = isBackground ? null : stringOrNull(formData.get("species")) ?? activeSpeciesName;
-
   const storagePath = `${primaryValue ?? "uncategorized"}/${crypto.randomUUID()}.${extensionFor(file)}`;
 
   const { error: uploadError } = await admin.storage
@@ -125,21 +121,33 @@ export async function POST(request: NextRequest) {
 
   // Legacy flat columns are populated opportunistically from the well-known
   // measurement keys (for existing queries/back-compat); they're no longer
-  // the source of truth for training — `measurements` is.
+  // the source of truth for training — `measurements` is. Both the new keys
+  // and the pre-restructure names are accepted so a mixed dataset keeps
+  // filling these columns. Species and colour are just schema classifications
+  // now (measurements["species"] / measurements["colour"]), same as any other
+  // — no more special-cased form fields or a schema-level "active species".
+  const measurementString = (...keys: string[]): string | null => {
+    for (const key of keys) if (typeof measurements[key] === "string") return measurements[key] as string;
+    return null;
+  };
+  const measurementNumber = (...keys: string[]): number | null => {
+    for (const key of keys) if (typeof measurements[key] === "number") return measurements[key] as number;
+    return null;
+  };
   const { data: row, error: insertError } = await admin
     .from("training_images")
     .insert({
       created_by: auth.context.userId,
       storage_path: storagePath,
       measurements,
-      condition: typeof measurements["condition"] === "string" ? measurements["condition"] : null,
-      subtype: typeof measurements["disease_subtype"] === "string" ? measurements["disease_subtype"] : null,
-      health_score: typeof measurements["health_score"] === "number" ? measurements["health_score"] : null,
-      dried_pct: typeof measurements["dried_extent"] === "number" ? measurements["dried_extent"] : null,
-      decayed_pct: typeof measurements["decayed_extent"] === "number" ? measurements["decayed_extent"] : null,
+      condition: measurementString("health_status", "condition"),
+      subtype: measurementString("disease", "disease_subtype"),
+      health_score: measurementNumber("health_score"),
+      dried_pct: measurementNumber("dried", "dried_extent"),
+      decayed_pct: measurementNumber("decayed", "decayed_extent"),
       is_background: isBackground,
-      species,
-      colour: isBackground ? null : stringOrNull(formData.get("colour")),
+      species: measurementString("species"),
+      colour: measurementString("colour"),
       notes: stringOrNull(formData.get("notes")),
     })
     .select()

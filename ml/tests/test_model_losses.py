@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import torch
 
-from config import AppliesWhen, ClassDef, Config, MeasurementDef, SegClassDef, Schema, SpeciesDef, schema_to_dict, schema_from_dict
+from config import AppliesWhen, ClassDef, Config, MeasurementDef, SegClassDef, Schema, schema_to_dict, schema_from_dict
 from src.losses import build_criterions, compute_losses
 from src.models.efficientnet import build_model, load_checkpoint, save_checkpoint
 
@@ -24,7 +24,7 @@ def _schema_with_all_three_types() -> Schema:
         loss_weight=1.0,
         min=0.0,
         max=100.0,
-        applies_when=AppliesWhen(key="condition", not_equals="Background"),
+        applies_when=[AppliesWhen(key="condition", not_equals="Background")],
     )
     biofouling = MeasurementDef(
         key="biofouling",
@@ -34,8 +34,6 @@ def _schema_with_all_three_types() -> Schema:
         seg_classes=[SegClassDef(name="background", color="#000000"), SegClassDef(name="algae", color="#22c55e")],
     )
     return Schema(
-        species=[SpeciesDef(name="Test species", slug="Test_species")],
-        active_species_slug="Test_species",
         health_moderate_min=45.0,
         health_healthy_min=75.0,
         measurements=[condition, health, biofouling],
@@ -149,18 +147,21 @@ def test_checkpoint_round_trip_preserves_schema(tmp_path):
 
 def test_load_checkpoint_synthesizes_legacy_schema_for_pre_schema_checkpoints(tmp_path):
     """A checkpoint saved by the old save_checkpoint (condition_classes/
-    subtype_classes/species, no "schema" key) must still load."""
-    from config import DEFAULT_SCHEMA
+    subtype_classes/species, no "schema" key) must still load — even now that
+    DEFAULT_SCHEMA has moved on to a different set of heads."""
+    from config import legacy_schema_from_checkpoint
     from src.models.efficientnet import build_model as _build
 
-    legacy_schema = DEFAULT_SCHEMA
-    model = _build(legacy_schema, freeze_backbone=False, pretrained=False)
-    legacy_payload = {
-        "model_state_dict": model.state_dict(),
+    legacy_meta = {
         "condition_classes": ["Background", "Healthy", "Disease", "Decay", "Dried"],
         "subtype_classes": ["IceIce", "Epiphyte", "Bacterial", "Bleaching", "Unknown"],
         "species": {"name": "Kappaphycus alvarezii", "slug": "Kappaphycus_alvarezii"},
     }
+    # An old checkpoint's weights were saved with the old heads, i.e. those the
+    # legacy synthesizer reproduces — build the state_dict from that schema.
+    legacy_schema = legacy_schema_from_checkpoint(legacy_meta)
+    model = _build(legacy_schema, freeze_backbone=False, pretrained=False)
+    legacy_payload = {"model_state_dict": model.state_dict(), **legacy_meta}
     path = tmp_path / "legacy.pt"
     torch.save(legacy_payload, path)
 

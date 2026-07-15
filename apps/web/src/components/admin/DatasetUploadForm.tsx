@@ -1,21 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  DEFAULT_SCHEMA,
-  getPrimaryClassification,
-  measurementApplies,
-  type SchemaDoc,
-} from "@/lib/schema";
+import { DEFAULT_SCHEMA, measurementApplies, type SchemaDoc } from "@/lib/schema";
 import { AdminButton, AdminCard, AdminField, AdminInput, AdminSelect, AdminTextarea, sectionHeadingClass } from "@/components/admin/ui";
 
 export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   // Starts from the built-in defaults and swaps to the live, admin-edited
-  // schema once it loads, so new measurements/species/classes appear here
-  // with no code change.
+  // schema once it loads, so new measurements/classes (species, disease, ...)
+  // appear here with no code change. Species is just another classification
+  // measurement in `schema.measurements` — no special-casing needed for it.
   const [schema, setSchema] = useState<SchemaDoc>(DEFAULT_SCHEMA);
   const [file, setFile] = useState<File | null>(null);
-  const [species, setSpecies] = useState("");
 
   // One value per measurement, keyed by measurement key. Classification ->
   // selected class name; regression -> raw number-input string (blank =
@@ -25,7 +20,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   const [numberValues, setNumberValues] = useState<Record<string, string>>({});
   const [maskFiles, setMaskFiles] = useState<Record<string, File | null>>({});
 
-  const [colour, setColour] = useState("");
   const [notes, setNotes] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
@@ -42,7 +36,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
       }
       return next;
     });
-    setSpecies((prev) => prev || doc.species.find((s) => s.slug === doc.active_species_slug)?.name || "");
   }
 
   useEffect(() => {
@@ -58,12 +51,8 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const primary = getPrimaryClassification(schema);
-  const isBackground = !!primary && classValues[primary.key] === primary.background_class;
-
   function resetForm() {
     setFile(null);
-    setColour("");
     setNotes("");
     setNumberValues({});
     setMaskFiles({});
@@ -102,10 +91,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
       const maskFile = maskFiles[m.key];
       if (maskFile) formData.append(`mask:${m.key}`, maskFile);
     }
-    if (!isBackground) {
-      formData.append("species", species);
-      formData.append("colour", colour);
-    }
     formData.append("notes", notes);
 
     try {
@@ -138,9 +123,12 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
           />
         </AdminField>
 
-        {/* One control per schema measurement, in schema order. A measurement
-            with an applies_when that isn't satisfied by the current selections
-            (e.g. disease_subtype when condition != Disease) is hidden. */}
+        {/* One control per schema measurement, in schema order (species,
+            health status, disease, colour, the lab metrics, ...). A
+            measurement with an applies_when that isn't satisfied by the
+            current selections (e.g. disease_severity when disease ==
+            NoDisease, or anything gated on seaweed_presence == Yes) is
+            hidden. */}
         {schema.measurements.map((m) => {
           if (!measurementApplies(m, classValues)) return null;
 
@@ -154,7 +142,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
                 >
                   {(m.classes ?? []).map((c) => (
                     <option key={c.name} value={c.name}>
-                      {m.background_class === c.name ? `${c.name} (no subject)` : c.name}
+                      {c.name}
                     </option>
                   ))}
                 </AdminSelect>
@@ -189,22 +177,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
             </AdminField>
           );
         })}
-
-        {!isBackground && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <AdminField label="Species">
-              <AdminInput type="text" value={species} onChange={(event) => setSpecies(event.target.value)} />
-            </AdminField>
-            <AdminField label="Colour">
-              <AdminInput
-                type="text"
-                value={colour}
-                onChange={(event) => setColour(event.target.value)}
-                placeholder="e.g. dark green"
-              />
-            </AdminField>
-          </div>
-        )}
 
         <AdminField label="Notes">
           <AdminTextarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />

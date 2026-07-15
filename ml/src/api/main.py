@@ -1,9 +1,9 @@
-"""Inference API for the Kappaphycus alvarezii health classifier (Milestone 6).
+"""Inference API for the seaweed multi-head classifier.
 
-Designed for future expansion: the response shape already carries `species`
-so that adding real species identification later is additive, not breaking.
-Additional endpoints (disease, predator, damage %) can be added as sibling
-routers without touching this one.
+`species` is a real predicted classification (see the "species" measurement
+in config.DEFAULT_SCHEMA) — /predict's `species` field is the model's actual
+per-image prediction, not a fixed constant. Additional endpoints (predator,
+damage %, ...) can be added as sibling routers without touching this one.
 
 Run:
     uvicorn src.api.main:app --reload --port 8000
@@ -120,21 +120,16 @@ def health() -> HealthCheckResponse:
     checkpoint_path = config.checkpoints_dir / "best_model.pt"
     model_loaded = checkpoint_path.exists()
     if model_loaded:
-        predictor = get_predictor()
-        schema = predictor.schema
-        species = predictor.species_name
+        schema = get_predictor().schema
     else:
-        # No checkpoint yet — report the active schema's own species/
-        # measurements so /health is still informative before first load.
+        # No checkpoint yet — report the active schema's own measurements so
+        # /health is still informative before first load.
         schema = SCHEMA
-        species = (
-            next((s.name for s in schema.species if s.slug == schema.active_species_slug), None)
-            or (schema.species[0].name if schema.species else "Unknown species")
-        )
+    species_measurement = schema.find("species")
     return HealthCheckResponse(
         status="ok",
         model_loaded=model_loaded,
-        species=species,
+        species_classes=species_measurement.class_names() if species_measurement else [],
         measurements=[m.key for m in schema.measurements],
     )
 
@@ -226,9 +221,10 @@ def reload_model(
         os.replace(staging_path, checkpoint_path)
         logger.info("Model hot-swapped from %s.", body.model_url)
 
+    species_measurement = new_predictor.schema.find("species")
     return ReloadResponse(
         status="ok",
         model_loaded=True,
-        species=new_predictor.species_name,
+        species_classes=species_measurement.class_names() if species_measurement else [],
         measurements=[m.key for m in new_predictor.schema.measurements],
     )

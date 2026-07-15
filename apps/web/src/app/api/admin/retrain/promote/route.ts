@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     message: "Model promoted — it is now serving live predictions.",
-    species: reloadPayload?.species ?? null,
+    speciesClasses: reloadPayload?.species_classes ?? null,
     checkpointUrl: run.checkpoint_url,
   });
 }

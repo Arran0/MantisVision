@@ -1,26 +1,25 @@
 // The measurement schema — the admin-editable definition of every per-image
 // measurement the model predicts (classification, regression, or
-// segmentation), plus the active species and preset explanation/
-// recommendation copy per class. This used to be a fixed condition/severity/
-// disease-subtype taxonomy hardcoded across ml/config.py,
-// ml/src/inference/explanations.py, and this file; it is now a versioned
-// JSONB document stored in Supabase (table measurement_schema), so an admin
-// can add a whole new measurement (e.g. "moisture", "gel_strength",
-// "biofouling") without any code change. New measurements with no
-// ground-truth data yet simply stay masked (untrained) until values arrive.
+// segmentation), plus preset explanation/recommendation copy per class. This
+// used to be a fixed condition/severity/disease-subtype taxonomy hardcoded
+// across ml/config.py, ml/src/inference/explanations.py, and this file; it is
+// now a versioned JSONB document stored in Supabase (table
+// measurement_schema), so an admin can add a whole new measurement (e.g.
+// "moisture", "gel_strength", "biofouling") without any code change. New
+// measurements with no ground-truth data yet simply stay masked (untrained)
+// until values arrive.
+//
+// Species is just another classification measurement (see DEFAULT_SCHEMA
+// below) — one class per species — not a special schema-level concept with
+// a single "active" one.
 //
 // This module holds the shared TypeScript shape, the DEFAULT_SCHEMA fallback
 // (kept in sync with the SQL seed in
-// supabase/migrations/20260714000005_measurement_schema.sql and
+// supabase/migrations/20260716000010_drop_background_class_requirement.sql and
 // ml/config.py's fallback), plus validation/derivation helpers usable from
 // both server and client code.
 
 export type MeasurementType = "classification" | "regression" | "segmentation";
-
-export interface SpeciesDef {
-  name: string;
-  slug: string;
-}
 
 // A class of a classification measurement. `explanation`/`recommendation` are
 // preset copy shown to end users for a prediction of this class (used mainly
@@ -39,11 +38,9 @@ export interface SegClassDef {
   color: string; // hex, e.g. "#22c55e" — used for the mask legend/overlay
 }
 
-// Gates a measurement so it's only meaningful (supervised in training, shown
-// in the UI) when another classification measurement's value matches. E.g.
-// disease_subtype only applies_when condition equals "Disease"; health_score
-// applies_when condition not_equals "Background". Exactly one of
-// equals/not_equals should be set.
+// One gating condition: a classification measurement (`key`) must equal (or
+// not equal) a given class name. Exactly one of equals/not_equals should be
+// set.
 export interface AppliesWhen {
   key: string;
   equals?: string;
@@ -55,7 +52,13 @@ export interface MeasurementDef {
   label: string;
   type: MeasurementType;
   loss_weight: number;
-  applies_when?: AppliesWhen | null;
+  // Gates a measurement so it's only meaningful (supervised in training,
+  // shown in the UI) when EVERY condition in this list holds — e.g.
+  // disease_severity applies_when [disease not_equals "NoDisease"]; a
+  // measurement can list several conditions (all must be satisfied,
+  // AND-combined) to depend on more than one sibling measurement at once.
+  // Absent/empty means "always applies".
+  applies_when?: AppliesWhen[] | null;
   // classification only
   background_class?: string | null; // name of the "no subject" class, if any
   classes?: ClassDef[];
@@ -68,70 +71,108 @@ export interface MeasurementDef {
 }
 
 export interface SchemaDoc {
-  species: SpeciesDef[];
-  active_species_slug: string;
-  // Display-level thresholds applied uniformly to health_score for any
-  // non-background subject (see ml/src/inference/predictor.py): at or above
-  // health_healthy_min -> "Healthy"; at or above health_moderate_min (but
-  // below healthy) -> "Moderate"; otherwise "Low". No condition/class name is
-  // special-cased — the two cutoffs are the whole rule.
-  health_moderate_min: number;
-  health_healthy_min: number;
+  // Legacy display-level thresholds, relevant only to a schema whose health
+  // measurement is still a regressed health_score (see
+  // ml/src/inference/predictor.py's _derive_level fallback for a
+  // pre-restructure checkpoint): at or above health_healthy_min ->
+  // "Healthy"; at or above health_moderate_min (but below healthy) ->
+  // "Moderate"; otherwise "Low". The current required schema assigns
+  // health_status directly as a classification instead, so these are
+  // optional and have no admin UI of their own.
+  health_moderate_min?: number;
+  health_healthy_min?: number;
   measurements: MeasurementDef[];
+}
+
+// "Seaweed present?" gates every subject-level measurement below: they only
+// apply when a specimen is actually in frame.
+const WHEN_SEAWEED_PRESENT: AppliesWhen[] = [{ key: "seaweed_presence", equals: "Yes" }];
+
+// A 0–100 (or other-range) lab/quality regression. Keeps the long block below
+// readable. Everything here is a starting point, not a fixed backbone — any
+// of it (including seaweed_presence/species/health_status/disease/colour
+// below) can be freely edited or removed from the admin Structure editor.
+function labRegression(
+  key: string,
+  label: string,
+  unit: string,
+  max: number,
+  applies_when: AppliesWhen[] = WHEN_SEAWEED_PRESENT
+): MeasurementDef {
+  return { key, label, type: "regression", loss_weight: 0.5, unit, min: 0, max, applies_when };
 }
 
 // Fallback used when no schema row exists yet. Mirrors the SQL seed.
 export const DEFAULT_SCHEMA: SchemaDoc = {
-  species: [{ name: "Kappaphycus alvarezii", slug: "Kappaphycus_alvarezii" }],
-  active_species_slug: "Kappaphycus_alvarezii",
+  // Retained for schema compatibility; health status is now a labeled
+  // classification (below), no longer derived from a numeric score.
   health_moderate_min: 45.0,
   health_healthy_min: 75.0,
   measurements: [
+    // A plain classification: is there a seaweed specimen in the frame?
     {
-      key: "condition",
-      label: "Condition",
+      key: "seaweed_presence",
+      label: "Seaweed presence",
       type: "classification",
       loss_weight: 1.0,
-      background_class: "Background",
       classes: [
         {
-          name: "Background",
+          name: "Yes",
+          explanation: "A seaweed specimen was detected in this image.",
+          recommendation: "Continue with the assessment below.",
+        },
+        {
+          name: "No",
           explanation: "No seaweed specimen was detected in this image.",
           recommendation: "Point the camera at a seaweed specimen, filling the frame, and try again.",
         },
+      ],
+    },
+    // Species is just another classification: one class per species you
+    // collect — add a class per new species, same as any other measurement.
+    {
+      key: "species",
+      label: "Species",
+      type: "classification",
+      loss_weight: 1.0,
+      applies_when: WHEN_SEAWEED_PRESENT,
+      classes: [{ name: "Kappaphycus_alvarezii" }],
+    },
+    // The overall health label — an explicit class, not a bucketed score.
+    {
+      key: "health_status",
+      label: "Health status",
+      type: "classification",
+      loss_weight: 1.0,
+      applies_when: WHEN_SEAWEED_PRESENT,
+      classes: [
         {
           name: "Healthy",
-          explanation:
-            "Vivid, even coloration with intact branching and no whitening, lesions, or breakage detected.",
+          explanation: "Vivid, even coloration with intact branching and no whitening, lesions, or breakage.",
           recommendation: "Continue routine monitoring. No action needed.",
         },
         {
-          name: "Disease",
-          explanation:
-            "Discrete lesions or spotting consistent with a disease outbreak, distinct from generalized decay.",
-          recommendation: "Isolate affected line segments and confirm the pathogen before treating.",
+          name: "Moderate",
+          explanation: "Some discoloration or minor structural loss, but the specimen is largely intact.",
+          recommendation: "Increase monitoring frequency and check water quality (temperature, salinity).",
         },
         {
-          name: "Decay",
-          explanation:
-            "Tissue melting with dark, mushy patches and a breakdown of branch structure, consistent with decay.",
-          recommendation:
-            "Remove affected fragments to prevent spread. Check water quality (temperature, salinity).",
-        },
-        {
-          name: "Dried",
-          explanation: "Tissue is brittle, bleached, and fully desiccated, with no living tissue remaining.",
-          recommendation: "Remove and dispose of dried-out material. Inspect the surrounding line for early damage.",
+          name: "Low",
+          explanation: "Extensive discoloration, tissue loss, or structural breakdown across the specimen.",
+          recommendation: "Remove affected fragments to prevent spread and investigate the cause promptly.",
         },
       ],
     },
+    // Named diseases + an explicit "no disease" class. Add a class per
+    // disease you want the model to recognise.
     {
-      key: "disease_subtype",
-      label: "Disease subtype",
+      key: "disease",
+      label: "Disease",
       type: "classification",
       loss_weight: 0.5,
-      applies_when: { key: "condition", equals: "Disease" },
+      applies_when: WHEN_SEAWEED_PRESENT,
       classes: [
+        { name: "NoDisease", explanation: "No disease detected." },
         {
           name: "IceIce",
           note: "Symptoms resemble ice-ice: raise water movement and reduce stress from high temperature/low salinity.",
@@ -139,39 +180,53 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
         { name: "Epiphyte", note: "Epiphyte overgrowth suspected: clean affected fronds and increase spacing/water flow." },
         { name: "Bacterial", note: "Possible bacterial infection: isolate and consult a specialist before any treatment." },
         { name: "Bleaching", note: "Bleaching suspected: check for temperature/light stress and relocate if possible." },
-        { name: "Unknown", note: "Subtype unclear: photograph affected areas closely and consult a specialist." },
       ],
     },
+    // Disease severity applies only once a disease (other than "no disease")
+    // has been recorded.
     {
-      key: "health_score",
-      label: "Health score",
+      key: "disease_severity",
+      label: "Disease severity",
       type: "regression",
-      loss_weight: 1.0,
+      loss_weight: 0.5,
       unit: "score",
       min: 0,
       max: 100,
-      applies_when: { key: "condition", not_equals: "Background" },
+      applies_when: [{ key: "disease", not_equals: "NoDisease" }],
     },
+    labRegression("dried", "Dried", "%", 100),
+    labRegression("decayed", "Decayed", "%", 100),
+    // Observed colour, a fixed palette (not free text).
     {
-      key: "dried_extent",
-      label: "Dried extent",
-      type: "regression",
+      key: "colour",
+      label: "Colour",
+      type: "classification",
       loss_weight: 0.5,
-      unit: "pct",
-      min: 0,
-      max: 100,
-      applies_when: { key: "condition", not_equals: "Background" },
+      applies_when: WHEN_SEAWEED_PRESENT,
+      classes: [
+        { name: "Green" },
+        { name: "Red" },
+        { name: "Brown" },
+        { name: "Yellow" },
+        { name: "Orange" },
+        { name: "White" },
+        { name: "Black" },
+      ],
     },
-    {
-      key: "decayed_extent",
-      label: "Decayed extent",
-      type: "regression",
-      loss_weight: 0.5,
-      unit: "pct",
-      min: 0,
-      max: 100,
-      applies_when: { key: "condition", not_equals: "Background" },
-    },
+    // Lab / quality-assay metrics.
+    labRegression("carrageenan_yield", "Carrageenan Yield", "%", 100),
+    labRegression("gel_strength", "Gel Strength", "g/cm²", 2000),
+    labRegression("viscosity", "Viscosity", "cP", 1000),
+    labRegression("daily_growth_rate", "Daily Growth Rate", "%/day", 100),
+    labRegression("mineral_ca", "Mineral Content — Ca", "mg/kg", 100000),
+    labRegression("mineral_mg", "Mineral Content — Mg", "mg/kg", 100000),
+    labRegression("mineral_k", "Mineral Content — K", "mg/kg", 100000),
+    labRegression("mineral_na", "Mineral Content — Na", "mg/kg", 100000),
+    labRegression("caw", "Clean Anhydrous Weed (CAW)", "%", 100),
+    labRegression("impurities", "Impurities", "%", 100),
+    labRegression("sulfate_content", "Sulfate Content", "%", 100),
+    labRegression("acid_insoluble_ash", "Acid-Insoluble Ash", "%", 100),
+    labRegression("ash_content", "Ash Content", "%", 100),
   ],
 };
 
@@ -183,6 +238,22 @@ export function findMeasurement(doc: SchemaDoc, key: string): MeasurementDef | u
 
 export function classificationMeasurements(doc: SchemaDoc): MeasurementDef[] {
   return doc.measurements.filter((m) => m.type === "classification");
+}
+
+// applies_when used to be a single condition object; it's now a list of
+// AND-combined conditions. Normalizes a doc loaded from storage (or a
+// hand-crafted payload) so a measurement whose applies_when is still the old
+// single-object shape becomes a one-element list, and anything else
+// (already a list, or null/absent) passes through unchanged.
+export function normalizeSchemaDoc(doc: SchemaDoc): SchemaDoc {
+  return {
+    ...doc,
+    measurements: doc.measurements.map((m) => {
+      const aw = m.applies_when as unknown;
+      if (aw && !Array.isArray(aw)) return { ...m, applies_when: [aw as AppliesWhen] };
+      return m;
+    }),
+  };
 }
 
 // The measurement that flags "no subject in frame" (analogous to the old
@@ -198,17 +269,20 @@ export function classNames(measurement: MeasurementDef): string[] {
 
 // Whether `measurement` is active given the current values of *other*
 // measurements (keyed by measurement key -> chosen class name). A measurement
-// with no applies_when is always active. Values are read as unknown so this
-// works with both the client's Record<string,string> class-value state and
-// the server's parsed-JSON measurements payload.
+// with no applies_when (or an empty one) is always active; with several
+// conditions, every one of them must hold (AND). Values are read as unknown
+// so this works with both the client's Record<string,string> class-value
+// state and the server's parsed-JSON measurements payload.
 export function measurementApplies(measurement: MeasurementDef, values: Record<string, unknown>): boolean {
-  const cond = measurement.applies_when;
-  if (!cond) return true;
-  const parentValue = values[cond.key];
-  if (parentValue === undefined || parentValue === null) return false;
-  if (cond.equals !== undefined) return parentValue === cond.equals;
-  if (cond.not_equals !== undefined) return parentValue !== cond.not_equals;
-  return true;
+  const conditions = measurement.applies_when;
+  if (!conditions || conditions.length === 0) return true;
+  return conditions.every((cond) => {
+    const parentValue = values[cond.key];
+    if (parentValue === undefined || parentValue === null) return false;
+    if (cond.equals !== undefined) return parentValue === cond.equals;
+    if (cond.not_equals !== undefined) return parentValue !== cond.not_equals;
+    return true;
+  });
 }
 
 // Whether `value` is a legal value for `measurement` (ignoring applies_when —
@@ -230,11 +304,10 @@ export function isValueValidForMeasurement(measurement: MeasurementDef, value: u
 }
 
 // --- Slug/key derivation -----------------------------------------------------
-// Measurement keys and species slugs are stable identifiers threaded through
-// the DB, the JSON schema, and the Python/ML pipeline — not something an
-// admin should hand-type. The editor derives them from the human-readable
-// label/name instead; these are exported so it (and validation) agree on the
-// exact same derivation.
+// Measurement keys are stable identifiers threaded through the DB, the JSON
+// schema, and the Python/ML pipeline — not something an admin should
+// hand-type. The editor derives them from the human-readable label instead;
+// exported so it (and validation) agree on the exact same derivation.
 
 export function slugifyKey(label: string): string {
   const slug = label
@@ -245,16 +318,12 @@ export function slugifyKey(label: string): string {
   return slug || "measurement";
 }
 
-export function slugifySlug(name: string): string {
-  const slug = name.trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return slug || "species";
-}
-
 // --- Validation ------------------------------------------------------------
 
-const SLUG_RE = /^[A-Za-z0-9_]+$/;
 const KEY_RE = /^[a-z][a-z0-9_]*$/; // measurement keys are manifest/JSON identifiers
-const TOKEN_RE = /^[A-Za-z0-9]+$/; // class/seg-class names stay folder-name safe
+// Class/seg-class names stay folder-name safe; underscores are allowed (e.g.
+// species classes like "Kappaphycus_alvarezii").
+const TOKEN_RE = /^[A-Za-z0-9_]+$/;
 const COLOR_RE = /^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/;
 
 function isFraction(v: unknown): v is number {
@@ -268,20 +337,18 @@ export function validateSchema(doc: unknown): string | null {
   if (typeof doc !== "object" || doc === null) return "Schema must be an object.";
   const t = doc as Partial<SchemaDoc>;
 
-  if (!Array.isArray(t.species) || t.species.length === 0) return "At least one species is required.";
-  for (const s of t.species) {
-    if (!s?.name?.trim()) return "Every species needs a name.";
-    if (!s?.slug || !SLUG_RE.test(s.slug))
-      return `Species slug ${JSON.stringify(s?.slug)} must contain only letters, numbers, and underscores.`;
-  }
-  const slugs = t.species.map((s) => s.slug);
-  if (new Set(slugs).size !== slugs.length) return "Species slugs must be unique.";
-  if (!t.active_species_slug || !slugs.includes(t.active_species_slug))
-    return "active_species_slug must match one of the species.";
-
-  if (!isFraction(t.health_moderate_min)) return "health_moderate_min must be a number between 0 and 100.";
-  if (!isFraction(t.health_healthy_min)) return "health_healthy_min must be a number between 0 and 100.";
-  if (t.health_healthy_min <= t.health_moderate_min)
+  // Optional legacy thresholds — only validated if present at all, since the
+  // required schema no longer has any UI to set them (health_status is
+  // assigned directly as a classification now).
+  if (t.health_moderate_min !== undefined && !isFraction(t.health_moderate_min))
+    return "health_moderate_min must be a number between 0 and 100.";
+  if (t.health_healthy_min !== undefined && !isFraction(t.health_healthy_min))
+    return "health_healthy_min must be a number between 0 and 100.";
+  if (
+    t.health_moderate_min !== undefined &&
+    t.health_healthy_min !== undefined &&
+    t.health_healthy_min <= t.health_moderate_min
+  )
     return "health_healthy_min must be greater than health_moderate_min.";
 
   if (!Array.isArray(t.measurements) || t.measurements.length === 0)
@@ -293,7 +360,6 @@ export function validateSchema(doc: unknown): string | null {
   for (const m of t.measurements) {
     if (!m.key || !KEY_RE.test(m.key))
       return `Measurement key ${JSON.stringify(m.key)} must be lowercase snake_case (e.g. "health_score").`;
-    if (m.key === "species") return `Measurement key "species" is reserved.`;
     if (!m.label?.trim()) return `Measurement ${m.key}: label is required.`;
     if (!["classification", "regression", "segmentation"].includes(m.type))
       return `Measurement ${m.key}: type must be classification, regression, or segmentation.`;
@@ -308,7 +374,7 @@ export function validateSchema(doc: unknown): string | null {
         return `Measurement ${m.key}: class names must be unique.`;
       for (const c of m.classes) {
         if (!c.name || !TOKEN_RE.test(c.name))
-          return `Measurement ${m.key}: class ${JSON.stringify(c.name)} must be a single alphanumeric token.`;
+          return `Measurement ${m.key}: class ${JSON.stringify(c.name)} must be a single alphanumeric/underscore token.`;
       }
       if (m.background_class != null && !classNamesList.includes(m.background_class))
         return `Measurement ${m.key}: background_class must be one of its own classes.`;
@@ -329,23 +395,24 @@ export function validateSchema(doc: unknown): string | null {
       }
     }
 
-    if (m.applies_when) {
-      const { key, equals, not_equals } = m.applies_when;
-      if (key === m.key) return `Measurement ${m.key}: applies_when cannot reference itself.`;
-      const parent = t.measurements.find((p) => p.key === key);
-      if (!parent) return `Measurement ${m.key}: applies_when references unknown measurement ${JSON.stringify(key)}.`;
-      if (parent.type !== "classification")
-        return `Measurement ${m.key}: applies_when must reference a classification measurement.`;
-      if ((equals === undefined) === (not_equals === undefined))
-        return `Measurement ${m.key}: applies_when must set exactly one of equals/not_equals.`;
-      const targetValue = (equals ?? not_equals) as string;
-      if (!(parent.classes ?? []).some((c) => c.name === targetValue))
-        return `Measurement ${m.key}: applies_when value ${JSON.stringify(targetValue)} is not a class of ${parent.key}.`;
+    if (m.applies_when && m.applies_when.length > 0) {
+      const seenKeys = new Set<string>();
+      for (const { key, equals, not_equals } of m.applies_when) {
+        if (key === m.key) return `Measurement ${m.key}: applies_when cannot reference itself.`;
+        if (seenKeys.has(key)) return `Measurement ${m.key}: applies_when lists ${JSON.stringify(key)} more than once.`;
+        seenKeys.add(key);
+        const parent = t.measurements.find((p) => p.key === key);
+        if (!parent) return `Measurement ${m.key}: applies_when references unknown measurement ${JSON.stringify(key)}.`;
+        if (parent.type !== "classification")
+          return `Measurement ${m.key}: applies_when must reference a classification measurement.`;
+        if ((equals === undefined) === (not_equals === undefined))
+          return `Measurement ${m.key}: applies_when must set exactly one of equals/not_equals.`;
+        const targetValue = (equals ?? not_equals) as string;
+        if (!(parent.classes ?? []).some((c) => c.name === targetValue))
+          return `Measurement ${m.key}: applies_when value ${JSON.stringify(targetValue)} is not a class of ${parent.key}.`;
+      }
     }
   }
-
-  if (!t.measurements.some((m) => m.type === "classification" && m.background_class))
-    return "At least one classification measurement must declare a background_class (a \"no subject\" class), so the model has negatives to train against.";
 
   return null;
 }
