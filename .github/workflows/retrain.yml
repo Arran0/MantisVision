@@ -13,6 +13,13 @@ on:
         description: "UUID of the model_runs row to update with progress/results"
         required: true
 
+permissions:
+  # retrain_and_report.py's create_github_release() calls the Releases API
+  # directly with the workflow's own auto-issued GITHUB_TOKEN — needs
+  # contents:write or that call 403s regardless of repo/org default token
+  # permissions.
+  contents: write
+
 jobs:
   retrain:
     runs-on: ubuntu-latest
