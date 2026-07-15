@@ -96,11 +96,31 @@ export function MeasurementSchemaEditor() {
   function patchClass(measurementIndex: number, classIndex: number, next: Partial<ClassDef>) {
     setDoc((prev) => ({
       ...prev,
-      measurements: prev.measurements.map((m, i) =>
-        i === measurementIndex
-          ? { ...m, classes: (m.classes ?? []).map((c, j) => (j === classIndex ? { ...c, ...next } : c)) }
-          : m
-      ),
+      measurements: prev.measurements.map((m, i) => {
+        if (i !== measurementIndex) return m;
+        const oldName = m.classes?.[classIndex]?.name;
+        const classes = (m.classes ?? []).map((c, j) => (j === classIndex ? { ...c, ...next } : c));
+        // Keep background_class pointing at the same class if it's the one
+        // being renamed here, so a rename doesn't silently invalidate it.
+        const background_class =
+          next.name !== undefined && m.background_class === oldName ? next.name : m.background_class;
+        return { ...m, classes, background_class };
+      }),
+    }));
+  }
+
+  // Removing a class that's currently the background_class would otherwise
+  // leave a dangling reference — clear it along with the class.
+  function removeClass(measurementIndex: number, classIndex: number) {
+    setDoc((prev) => ({
+      ...prev,
+      measurements: prev.measurements.map((m, i) => {
+        if (i !== measurementIndex) return m;
+        const removedName = m.classes?.[classIndex]?.name;
+        const classes = (m.classes ?? []).filter((_, j) => j !== classIndex);
+        const background_class = m.background_class === removedName ? null : m.background_class;
+        return { ...m, classes, background_class };
+      }),
     }));
   }
 
@@ -349,7 +369,7 @@ export function MeasurementSchemaEditor() {
                                 type="button"
                                 variant="ghost"
                                 className="mb-0.5 text-rose-600 hover:bg-rose-50"
-                                onClick={() => patchMeasurement(i, { classes: (m.classes ?? []).filter((_, j) => j !== ci) })}
+                                onClick={() => removeClass(i, ci)}
                               >
                                 Remove
                               </AdminButton>
@@ -382,6 +402,30 @@ export function MeasurementSchemaEditor() {
                         >
                           + Add class
                         </AdminButton>
+                      )}
+                      {m.type === "classification" && (
+                        <AdminField
+                          label="Background / no-subject class"
+                          className="max-w-xs"
+                        >
+                          <AdminSelect
+                            value={m.background_class ?? ""}
+                            onChange={(e) => patchMeasurement(i, { background_class: e.target.value || null })}
+                          >
+                            <option value="">— none —</option>
+                            {(m.classes ?? [])
+                              .filter((c) => c.name)
+                              .map((c) => (
+                                <option key={c.name} value={c.name}>
+                                  {c.name}
+                                </option>
+                              ))}
+                          </AdminSelect>
+                          <p className="mt-1 text-xs text-zinc-400">
+                            If set, this class means &ldquo;no subject in frame&rdquo; — the model needs at least one
+                            measurement with this set, with diverse negative photos labeled under it.
+                          </p>
+                        </AdminField>
                       )}
 
                       {m.type === "regression" && (
