@@ -15,7 +15,7 @@
 //
 // This module holds the shared TypeScript shape, the DEFAULT_SCHEMA fallback
 // (kept in sync with the SQL seed in
-// supabase/migrations/20260716000009_editable_schema_and_multi_condition_gating.sql and
+// supabase/migrations/20260716000010_drop_background_class_requirement.sql and
 // ml/config.py's fallback), plus validation/derivation helpers usable from
 // both server and client code.
 
@@ -109,14 +109,12 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
   health_moderate_min: 45.0,
   health_healthy_min: 75.0,
   measurements: [
-    // The primary classifier: is there a seaweed specimen in the frame at all?
-    // "No" is the background / no-subject class the model trains against.
+    // A plain classification: is there a seaweed specimen in the frame?
     {
       key: "seaweed_presence",
       label: "Seaweed presence",
       type: "classification",
       loss_weight: 1.0,
-      background_class: "No",
       classes: [
         {
           name: "Yes",
@@ -415,9 +413,6 @@ export function validateSchema(doc: unknown): string | null {
       }
     }
   }
-
-  if (!t.measurements.some((m) => m.type === "classification" && m.background_class))
-    return "At least one classification measurement must declare a background_class (a \"no subject\" class), so the model has negatives to train against.";
 
   return null;
 }

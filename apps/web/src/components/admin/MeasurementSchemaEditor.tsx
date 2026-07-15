@@ -403,30 +403,6 @@ export function MeasurementSchemaEditor() {
                           + Add class
                         </AdminButton>
                       )}
-                      {m.type === "classification" && (
-                        <AdminField
-                          label="Background / no-subject class"
-                          className="max-w-xs"
-                        >
-                          <AdminSelect
-                            value={m.background_class ?? ""}
-                            onChange={(e) => patchMeasurement(i, { background_class: e.target.value || null })}
-                          >
-                            <option value="">— none —</option>
-                            {(m.classes ?? [])
-                              .filter((c) => c.name)
-                              .map((c) => (
-                                <option key={c.name} value={c.name}>
-                                  {c.name}
-                                </option>
-                              ))}
-                          </AdminSelect>
-                          <p className="mt-1 text-xs text-zinc-400">
-                            If set, this class means &ldquo;no subject in frame&rdquo; — the model needs at least one
-                            measurement with this set, with diverse negative photos labeled under it.
-                          </p>
-                        </AdminField>
-                      )}
 
                       {m.type === "regression" && (
                         <div className="grid gap-3 sm:grid-cols-3">

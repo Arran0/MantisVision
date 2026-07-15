@@ -214,7 +214,7 @@ def schema_to_dict(schema: Schema) -> dict:
 
 # The default schema — kept in sync with apps/web/src/lib/schema.ts's
 # DEFAULT_SCHEMA and the SQL seed in
-# supabase/migrations/20260716000009_editable_schema_and_multi_condition_gating.sql. Just a
+# supabase/migrations/20260716000010_drop_background_class_requirement.sql. Just a
 # starting point: every measurement here (including seaweed_presence) is
 # freely editable/removable from the admin Structure editor.
 _WHEN_SEAWEED_PRESENT = [{"key": "seaweed_presence", "equals": "Yes"}]
@@ -243,7 +243,6 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
                 "label": "Seaweed presence",
                 "type": "classification",
                 "loss_weight": 1.0,
-                "background_class": "No",
                 "classes": [
                     {
                         "name": "Yes",

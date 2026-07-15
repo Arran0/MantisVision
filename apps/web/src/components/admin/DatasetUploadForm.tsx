@@ -142,7 +142,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
                 >
                   {(m.classes ?? []).map((c) => (
                     <option key={c.name} value={c.name}>
-                      {m.background_class === c.name ? `${c.name} (no subject)` : c.name}
+                      {c.name}
                     </option>
                   ))}
                 </AdminSelect>
