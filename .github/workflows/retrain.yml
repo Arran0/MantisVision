@@ -45,6 +45,7 @@ jobs:
           python scripts/export_schema.py
 
       - name: Run retraining
+        id: run_retraining
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -55,3 +56,18 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python scripts/retrain_and_report.py --model-run-id "${{ inputs.model_run_id }}"
+
+      # A failure inside "Run retraining" already reports its own specific
+      # error to model_runs (see retrain_and_report.py's except block) before
+      # re-raising, so this step's outcome is "failure", not "skipped" — this
+      # condition only fires for a failure in an *earlier* step (checkout,
+      # dependency install, schema export), which has no such handler and
+      # would otherwise leave the run stuck at "queued" forever with no
+      # feedback in the admin panel.
+      - name: Report an earlier-step failure back to model_runs
+        if: failure() && steps.run_retraining.outcome == 'skipped'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python -c "from scripts.retrain_and_report import update_run; update_run('${{ inputs.model_run_id }}', status='failed', error='Workflow failed before training started (dependency install or schema export) - check the Actions run logs.')"
