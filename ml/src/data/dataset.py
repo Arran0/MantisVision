@@ -1,6 +1,6 @@
 """Dataloader construction for the schema-driven multi-head seaweed model.
 
-Each split directory (dataset/<species_slug>/{train,validation,test}/) holds
+Each split directory (dataset/{train,validation,test}/) holds
 flat images/ + masks/<key>/ + an annotations.jsonl manifest (see
 src/data/annotations.py) — replacing the old ImageFolder class-folder
 convention, since per-image column annotations (not folder names) are now the

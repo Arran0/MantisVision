@@ -128,10 +128,6 @@ class Predictor:
         self.device = get_device(config.device)
         checkpoint_path = checkpoint_path or (config.checkpoints_dir / "best_model.pt")
         self.model, self.schema = load_checkpoint(checkpoint_path, self.device)
-        self.species_name = (
-            next((s.name for s in self.schema.species if s.slug == self.schema.active_species_slug), None)
-            or (self.schema.species[0].name if self.schema.species else "Unknown species")
-        )
         self.transform = build_transforms(config, train=False)
         gc.collect()
 
@@ -241,6 +237,14 @@ class Predictor:
         else:
             level = None
 
+        # Species is a real predicted classification now (see the "species"
+        # measurement in DEFAULT_SCHEMA), not a fixed schema-wide constant —
+        # older checkpoints predate it entirely, hence the fallback.
+        species_result = measurements.get("species")
+        species_value = (
+            species_result.value if species_result and isinstance(species_result.value, str) else "Unknown species"
+        )
+
         dried_result = first_result("dried", "dried_extent")
         decayed_result = first_result("decayed", "decayed_extent")
         disease_result = first_result("disease", "disease_subtype")
@@ -265,7 +269,7 @@ class Predictor:
 
         del input_tensor
         return PredictionResult(
-            species=self.species_name,
+            species=species_value,
             is_seaweed=not is_background,
             condition=condition_name,
             health=level,

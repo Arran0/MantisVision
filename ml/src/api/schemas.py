@@ -36,7 +36,10 @@ class PredictionResponse(BaseModel):
 class HealthCheckResponse(BaseModel):
     status: str
     model_loaded: bool
-    species: str
+    # Species is a per-image predicted classification now, not a fixed
+    # schema-level value — report the full list of species classes the
+    # loaded schema knows about instead of a single "active" one.
+    species_classes: list[str]
     measurements: list[str]  # measurement keys the loaded checkpoint's schema defines
 
 
@@ -50,5 +53,5 @@ class ReloadRequest(BaseModel):
 class ReloadResponse(BaseModel):
     status: str
     model_loaded: bool
-    species: str
+    species_classes: list[str]
     measurements: list[str]

@@ -22,8 +22,6 @@ from config import schema_from_dict
 from src.data.dataset import AnnotatedDataset
 
 SCHEMA_DOC = {
-    "species": [{"name": "Kappaphycus alvarezii", "slug": "Kappaphycus_alvarezii"}],
-    "active_species_slug": "Kappaphycus_alvarezii",
     "health_moderate_min": 45.0,
     "health_healthy_min": 75.0,
     "measurements": [
@@ -152,8 +150,8 @@ def test_fetch_active_schema_falls_back_to_default_when_no_row(mock_supabase, mo
     monkeypatch.setenv("SUPABASE_URL", f"http://127.0.0.1:{server.server_address[1]}")
     try:
         doc = fetch_active_schema()
-        assert doc["active_species_slug"] == "Kappaphycus_alvarezii"
         assert any(m["key"] == "seaweed_presence" for m in doc["measurements"])
+        assert any(m["key"] == "species" for m in doc["measurements"])
     finally:
         server.shutdown()
         thread.join(timeout=5)
@@ -171,7 +169,7 @@ def test_materialize_new_labels_writes_a_dataset_the_annotated_dataset_can_load(
     monkeypatch.setattr(config_module.config, "dataset_root", tmp_path / "dataset")
     monkeypatch.setattr(config_module.config, "image_size", 16)
     cfg = config_module.config
-    assert cfg.species_slug == "Kappaphycus_alvarezii"  # matches SCHEMA_DOC's active_species_slug
+    assert cfg.dataset_dir == tmp_path / "dataset"  # no longer species-scoped
 
     schema = schema_from_dict(SCHEMA_DOC)
     images = fetch_labeled_images()

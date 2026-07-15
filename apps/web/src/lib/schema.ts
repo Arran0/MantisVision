@@ -1,26 +1,25 @@
 // The measurement schema — the admin-editable definition of every per-image
 // measurement the model predicts (classification, regression, or
-// segmentation), plus the active species and preset explanation/
-// recommendation copy per class. This used to be a fixed condition/severity/
-// disease-subtype taxonomy hardcoded across ml/config.py,
-// ml/src/inference/explanations.py, and this file; it is now a versioned
-// JSONB document stored in Supabase (table measurement_schema), so an admin
-// can add a whole new measurement (e.g. "moisture", "gel_strength",
-// "biofouling") without any code change. New measurements with no
-// ground-truth data yet simply stay masked (untrained) until values arrive.
+// segmentation), plus preset explanation/recommendation copy per class. This
+// used to be a fixed condition/severity/disease-subtype taxonomy hardcoded
+// across ml/config.py, ml/src/inference/explanations.py, and this file; it is
+// now a versioned JSONB document stored in Supabase (table
+// measurement_schema), so an admin can add a whole new measurement (e.g.
+// "moisture", "gel_strength", "biofouling") without any code change. New
+// measurements with no ground-truth data yet simply stay masked (untrained)
+// until values arrive.
+//
+// Species is just another classification measurement (see DEFAULT_SCHEMA
+// below) — one class per species, admin-extensible like "disease" — not a
+// special schema-level concept with a single "active" one.
 //
 // This module holds the shared TypeScript shape, the DEFAULT_SCHEMA fallback
 // (kept in sync with the SQL seed in
-// supabase/migrations/20260714000005_measurement_schema.sql and
+// supabase/migrations/20260715000007_species_as_classification.sql and
 // ml/config.py's fallback), plus validation/derivation helpers usable from
 // both server and client code.
 
 export type MeasurementType = "classification" | "regression" | "segmentation";
-
-export interface SpeciesDef {
-  name: string;
-  slug: string;
-}
 
 // A class of a classification measurement. `explanation`/`recommendation` are
 // preset copy shown to end users for a prediction of this class (used mainly
@@ -80,8 +79,6 @@ export interface MeasurementDef {
 }
 
 export interface SchemaDoc {
-  species: SpeciesDef[];
-  active_species_slug: string;
   // Display-level thresholds applied uniformly to health_score for any
   // non-background subject (see ml/src/inference/predictor.py): at or above
   // health_healthy_min -> "Healthy"; at or above health_moderate_min (but
@@ -110,8 +107,6 @@ function requiredRegression(
 
 // Fallback used when no schema row exists yet. Mirrors the SQL seed.
 export const DEFAULT_SCHEMA: SchemaDoc = {
-  species: [{ name: "Kappaphycus alvarezii", slug: "Kappaphycus_alvarezii" }],
-  active_species_slug: "Kappaphycus_alvarezii",
   // Retained for schema compatibility; health status is now a labeled
   // classification (below), no longer derived from a numeric score.
   health_moderate_min: 45.0,
@@ -138,6 +133,20 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
           recommendation: "Point the camera at a seaweed specimen, filling the frame, and try again.",
         },
       ],
+    },
+    // Species is just another classification: one class per species you
+    // collect, admin-extensible (add a class per new species) — there's no
+    // separate "active species" concept, and no cap of one species per
+    // deployment.
+    {
+      key: "species",
+      label: "Species",
+      type: "classification",
+      loss_weight: 1.0,
+      applies_when: WHEN_SEAWEED_PRESENT,
+      locked: true,
+      extensible_classes: true,
+      classes: [{ name: "Kappaphycus_alvarezii" }],
     },
     // The overall health label — an explicit class, not a bucketed score.
     {
@@ -298,11 +307,10 @@ export function isValueValidForMeasurement(measurement: MeasurementDef, value: u
 }
 
 // --- Slug/key derivation -----------------------------------------------------
-// Measurement keys and species slugs are stable identifiers threaded through
-// the DB, the JSON schema, and the Python/ML pipeline — not something an
-// admin should hand-type. The editor derives them from the human-readable
-// label/name instead; these are exported so it (and validation) agree on the
-// exact same derivation.
+// Measurement keys are stable identifiers threaded through the DB, the JSON
+// schema, and the Python/ML pipeline — not something an admin should
+// hand-type. The editor derives them from the human-readable label instead;
+// exported so it (and validation) agree on the exact same derivation.
 
 export function slugifyKey(label: string): string {
   const slug = label
@@ -313,16 +321,12 @@ export function slugifyKey(label: string): string {
   return slug || "measurement";
 }
 
-export function slugifySlug(name: string): string {
-  const slug = name.trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return slug || "species";
-}
-
 // --- Validation ------------------------------------------------------------
 
-const SLUG_RE = /^[A-Za-z0-9_]+$/;
 const KEY_RE = /^[a-z][a-z0-9_]*$/; // measurement keys are manifest/JSON identifiers
-const TOKEN_RE = /^[A-Za-z0-9]+$/; // class/seg-class names stay folder-name safe
+// Class/seg-class names stay folder-name safe; underscores are allowed (e.g.
+// species classes like "Kappaphycus_alvarezii").
+const TOKEN_RE = /^[A-Za-z0-9_]+$/;
 const COLOR_RE = /^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/;
 
 function isFraction(v: unknown): v is number {
@@ -335,17 +339,6 @@ function isFraction(v: unknown): v is number {
 export function validateSchema(doc: unknown): string | null {
   if (typeof doc !== "object" || doc === null) return "Schema must be an object.";
   const t = doc as Partial<SchemaDoc>;
-
-  if (!Array.isArray(t.species) || t.species.length === 0) return "At least one species is required.";
-  for (const s of t.species) {
-    if (!s?.name?.trim()) return "Every species needs a name.";
-    if (!s?.slug || !SLUG_RE.test(s.slug))
-      return `Species slug ${JSON.stringify(s?.slug)} must contain only letters, numbers, and underscores.`;
-  }
-  const slugs = t.species.map((s) => s.slug);
-  if (new Set(slugs).size !== slugs.length) return "Species slugs must be unique.";
-  if (!t.active_species_slug || !slugs.includes(t.active_species_slug))
-    return "active_species_slug must match one of the species.";
 
   if (!isFraction(t.health_moderate_min)) return "health_moderate_min must be a number between 0 and 100.";
   if (!isFraction(t.health_healthy_min)) return "health_healthy_min must be a number between 0 and 100.";
@@ -361,7 +354,6 @@ export function validateSchema(doc: unknown): string | null {
   for (const m of t.measurements) {
     if (!m.key || !KEY_RE.test(m.key))
       return `Measurement key ${JSON.stringify(m.key)} must be lowercase snake_case (e.g. "health_score").`;
-    if (m.key === "species") return `Measurement key "species" is reserved.`;
     if (!m.label?.trim()) return `Measurement ${m.key}: label is required.`;
     if (!["classification", "regression", "segmentation"].includes(m.type))
       return `Measurement ${m.key}: type must be classification, regression, or segmentation.`;
@@ -376,7 +368,7 @@ export function validateSchema(doc: unknown): string | null {
         return `Measurement ${m.key}: class names must be unique.`;
       for (const c of m.classes) {
         if (!c.name || !TOKEN_RE.test(c.name))
-          return `Measurement ${m.key}: class ${JSON.stringify(c.name)} must be a single alphanumeric token.`;
+          return `Measurement ${m.key}: class ${JSON.stringify(c.name)} must be a single alphanumeric/underscore token.`;
       }
       if (m.background_class != null && !classNamesList.includes(m.background_class))
         return `Measurement ${m.key}: background_class must be one of its own classes.`;

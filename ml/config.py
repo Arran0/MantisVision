@@ -8,11 +8,16 @@ The model is schema-driven (see src/models/efficientnet.py's build_model):
 it grows one head per measurement the active Schema defines — classification,
 regression, or segmentation — rather than a fixed set. There are no class
 folders anywhere in this pipeline; per-image ground truth is a column/CSV-
-style manifest (see src/data/annotations.py).
+style manifest (see src/data/annotations.py). Species is one such
+measurement too (see DEFAULT_SCHEMA below) — a normal, admin-extensible
+classification, not a schema-level "active species" concept, so the dataset
+directory is no longer species-scoped (see Config.dataset_dir).
 
-Discrete health *level* (Healthy/Moderate/Low) is NOT a class — it's derived
-at inference purely from the regressed health_score against the schema's two
-thresholds (see src/inference/predictor.py).
+health_status (Healthy/Moderate/Low) is a labeled classification the admin
+assigns per image, not a bucket derived from a score. health_moderate_min/
+health_healthy_min are kept only so an older checkpoint that still regresses
+a health_score can be bucketed into the same display level (see
+src/inference/predictor.py's _derive_level).
 """
 from __future__ import annotations
 
@@ -23,12 +28,12 @@ from pathlib import Path
 
 ML_ROOT = Path(__file__).resolve().parent
 
-# --- Default species and taxonomy ------------------------------------------
+# --- Default taxonomy -------------------------------------------------------
 # These are only the *fallback* values baked into DEFAULT_SCHEMA below (and
 # used to synthesize a schema for a checkpoint saved before schemas existed —
 # see legacy_schema_from_checkpoint). The real, admin-editable source of
 # truth is the measurement schema itself.
-SPECIES = {"name": "Kappaphycus alvarezii", "slug": "Kappaphycus_alvarezii"}
+DEFAULT_SPECIES_CLASS = "Kappaphycus_alvarezii"
 DEFAULT_CONDITION_CLASSES = ["Background", "Healthy", "Disease", "Decay", "Dried"]
 DEFAULT_DISEASE_SUBTYPES = ["IceIce", "Epiphyte", "Bacterial", "Bleaching", "Unknown"]
 
@@ -49,12 +54,6 @@ DEFAULT_HEALTH_HEALTHY_MIN: float = 75.0
 #
 # Loading is schema.json-if-present else DEFAULT_SCHEMA, so a repo checkout
 # with no exported schema.json behaves identically to before this existed.
-
-
-@dataclass
-class SpeciesDef:
-    name: str
-    slug: str
 
 
 @dataclass
@@ -104,8 +103,6 @@ class MeasurementDef:
 
 @dataclass
 class Schema:
-    species: list[SpeciesDef]
-    active_species_slug: str
     health_moderate_min: float
     health_healthy_min: float
     measurements: list[MeasurementDef]
@@ -167,8 +164,6 @@ def schema_from_dict(doc: dict) -> Schema:
         )
 
     return Schema(
-        species=[SpeciesDef(name=s["name"], slug=s["slug"]) for s in doc["species"]],
-        active_species_slug=doc["active_species_slug"],
         health_moderate_min=float(doc.get("health_moderate_min", DEFAULT_HEALTH_MODERATE_MIN)),
         health_healthy_min=float(doc.get("health_healthy_min", DEFAULT_HEALTH_HEALTHY_MIN)),
         measurements=[_measurement(m) for m in doc["measurements"]],
@@ -212,8 +207,6 @@ def schema_to_dict(schema: Schema) -> dict:
         return d
 
     return {
-        "species": [{"name": s.name, "slug": s.slug} for s in schema.species],
-        "active_species_slug": schema.active_species_slug,
         "health_moderate_min": schema.health_moderate_min,
         "health_healthy_min": schema.health_healthy_min,
         "measurements": [_measurement(m) for m in schema.measurements],
@@ -222,7 +215,7 @@ def schema_to_dict(schema: Schema) -> dict:
 
 # The fixed, must-required schema — kept in sync with
 # apps/web/src/lib/schema.ts's DEFAULT_SCHEMA and the SQL seed in
-# supabase/migrations/20260715000006_seaweed_schema_restructure.sql.
+# supabase/migrations/20260715000007_species_as_classification.sql.
 _WHEN_SEAWEED_PRESENT = {"key": "seaweed_presence", "equals": "Yes"}
 
 
@@ -242,8 +235,6 @@ def _required_regression(key: str, label: str, unit: str, max_value: float, appl
 
 DEFAULT_SCHEMA: Schema = schema_from_dict(
     {
-        "species": [{"name": SPECIES["name"], "slug": SPECIES["slug"]}],
-        "active_species_slug": SPECIES["slug"],
         "health_moderate_min": DEFAULT_HEALTH_MODERATE_MIN,
         "health_healthy_min": DEFAULT_HEALTH_HEALTHY_MIN,
         "measurements": [
@@ -266,6 +257,19 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
                         "recommendation": "Point the camera at a seaweed specimen, filling the frame, and try again.",
                     },
                 ],
+            },
+            {
+                # Species is just another classification: one class per
+                # species, admin-extensible (add a class per new species) —
+                # no separate "active species" concept.
+                "key": "species",
+                "label": "Species",
+                "type": "classification",
+                "loss_weight": 1.0,
+                "applies_when": _WHEN_SEAWEED_PRESENT,
+                "locked": True,
+                "extensible_classes": True,
+                "classes": [{"name": DEFAULT_SPECIES_CLASS}],
             },
             {
                 "key": "health_status",
@@ -391,10 +395,13 @@ def legacy_schema_from_checkpoint(payload: dict) -> Schema:
     (payload has condition_classes/subtype_classes/species but no schema key),
     so old checkpoints keep loading. Preset copy comes from the self-contained
     legacy tables above for any class name that matches; unmatched classes
-    (e.g. an admin-renamed taxonomy) get no preset copy."""
+    (e.g. an admin-renamed taxonomy) get no preset copy. The payload's
+    `species` dict (if any) isn't reconstructed into a measurement: those old
+    checkpoints predate species being a predicted head at all (it was a fixed,
+    untrained constant), so their state_dict has no matching "species" head to
+    load weights into."""
     condition_classes: list[str] = payload.get("condition_classes") or list(DEFAULT_CONDITION_CLASSES)
     subtype_classes: list[str] = payload.get("subtype_classes") or list(DEFAULT_DISEASE_SUBTYPES)
-    species: dict = payload.get("species") or dict(SPECIES)
 
     condition_measurement = MeasurementDef(
         key="condition",
@@ -440,10 +447,7 @@ def legacy_schema_from_checkpoint(payload: dict) -> Schema:
         ]
     ]
 
-    slug = species.get("slug", SPECIES["slug"])
     return Schema(
-        species=[SpeciesDef(name=species.get("name", SPECIES["name"]), slug=slug)],
-        active_species_slug=slug,
         health_moderate_min=DEFAULT_HEALTH_MODERATE_MIN,
         health_healthy_min=DEFAULT_HEALTH_HEALTHY_MIN,
         measurements=[condition_measurement, subtype_measurement, *regression_measurements],
@@ -479,7 +483,10 @@ SCHEMA: Schema = load_schema()
 class Config:
     seed: int = 42
 
-    # dataset/<species_slug>/{train,validation,test}/images|masks/*+annotations.jsonl
+    # dataset/{train,validation,test}/images|masks/*+annotations.jsonl — not
+    # species-scoped; species is a normal per-image classification column
+    # (see the "species" measurement in DEFAULT_SCHEMA), so one dataset holds
+    # every species you collect.
     dataset_root: Path = ML_ROOT / "dataset"
 
     checkpoints_dir: Path = ML_ROOT / "checkpoints"
@@ -515,12 +522,8 @@ class Config:
     device: str = "cuda"  # falls back to cpu automatically, see utils.seed
 
     @property
-    def species_slug(self) -> str:
-        return SCHEMA.active_species_slug
-
-    @property
     def dataset_dir(self) -> Path:
-        return self.dataset_root / SCHEMA.active_species_slug
+        return self.dataset_root
 
     @property
     def train_dir(self) -> Path:

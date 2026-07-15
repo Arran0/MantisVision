@@ -18,7 +18,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from config import AppliesWhen, ClassDef, Config, MeasurementDef, SegClassDef, Schema, SpeciesDef
+from config import AppliesWhen, ClassDef, Config, MeasurementDef, SegClassDef, Schema
 from src.models.efficientnet import load_checkpoint
 from src.train import train
 
@@ -51,8 +51,6 @@ def _make_schema() -> Schema:
         seg_classes=[SegClassDef(name="background", color="#000000"), SegClassDef(name="algae", color="#22c55e")],
     )
     return Schema(
-        species=[SpeciesDef(name="Kappaphycus alvarezii", slug="Kappaphycus_alvarezii")],
-        active_species_slug="Kappaphycus_alvarezii",
         health_moderate_min=45.0,
         health_healthy_min=75.0,
         measurements=[condition, health, biofouling],
@@ -87,7 +85,6 @@ def _write_split(split_dir, rows_spec):
 
 def _build_synthetic_dataset(tmp_path, schema: Schema) -> Config:
     dataset_root = tmp_path / "dataset"
-    species_dir = dataset_root / schema.active_species_slug
 
     # Every split needs at least one Background sample (the model's negative
     # class) plus at least one non-background sample so health_score/
@@ -98,9 +95,9 @@ def _build_synthetic_dataset(tmp_path, schema: Schema) -> Config:
         ("disease1.jpg", "Disease", 40.0, False),
         ("healthy2.jpg", "Healthy", 91.0, False),
     ]
-    _write_split(species_dir / "train", common_rows)
-    _write_split(species_dir / "validation", common_rows)
-    _write_split(species_dir / "test", common_rows)
+    _write_split(dataset_root / "train", common_rows)
+    _write_split(dataset_root / "validation", common_rows)
+    _write_split(dataset_root / "test", common_rows)
 
     return Config(
         dataset_root=dataset_root,
@@ -132,7 +129,6 @@ def test_train_smoke_end_to_end(tmp_path):
 
     model, loaded_schema = load_checkpoint(checkpoint_path, torch.device("cpu"))
     assert [m.key for m in loaded_schema.measurements] == ["condition", "health_score", "biofouling"]
-    assert loaded_schema.active_species_slug == "Kappaphycus_alvarezii"
 
     model.eval()
     with torch.no_grad():

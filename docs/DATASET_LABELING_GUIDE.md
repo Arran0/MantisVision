@@ -14,11 +14,14 @@ label is a **column value** against the active **measurement schema**
 no schema has been saved yet). A split directory looks like:
 
 ```
-ml/dataset/<species_slug>/
+ml/dataset/
   train/       images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
   validation/  images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
   test/        images/*.jpg  masks/<measurement_key>/*.png  annotations.jsonl
 ```
+
+Not species-scoped: species is a normal per-image classification column (see
+below), so one dataset holds every species you collect.
 
 `annotations.jsonl` holds one JSON object per image:
 
@@ -55,6 +58,7 @@ columns. The core ones:
 | Measurement | Type | Values |
 |---|---|---|
 | `seaweed_presence` | classification (primary) | `Yes`, `No` |
+| `species` | classification, `applies_when seaweed_presence == "Yes"` | `Kappaphycus_alvarezii`, … |
 | `health_status` | classification, `applies_when seaweed_presence == "Yes"` | `Healthy`, `Moderate`, `Low` |
 | `disease` | classification, `applies_when seaweed_presence == "Yes"` | `NoDisease`, `IceIce`, `Epiphyte`, `Bacterial`, `Bleaching`, … |
 | `disease_severity` | regression 0–100, `applies_when disease != "NoDisease"` | a continuous score |
@@ -69,9 +73,10 @@ per-mineral content `mineral_ca`/`mineral_mg`/`mineral_k`/`mineral_na`
 
 Every one of these is **locked** — the admin Structure editor renders it
 read-only and the schema API rejects removing or retyping it — so the dataset
-always collects the same required columns. The one exception is `disease`,
-whose class list is **extensible**: add one class per named disease you want
-the model to recognise (keep the `NoDisease` class as the negative).
+always collects the same required columns. `species` and `disease` are the
+exceptions: their class lists are **extensible** — add one class per species
+or named disease you want the model to recognise (keep `NoDisease` as
+disease's negative).
 
 `seaweed_presence` is the **primary classifier**: its `No` class (formerly
 "Background") is the schema's designated "no seaweed" class. Fill it with
@@ -90,10 +95,11 @@ code change; the model, losses, dataset loader, and predictor all grow the new
 head generically from the schema. A new measurement stays masked (untrained,
 no effect on other heads) until images with real values for it exist.
 
-Species is managed in the schema's **Species** section — add one row per
-species you collect and pick it from a dropdown when labeling. There's no
-longer an "active species" toggle; `active_species_slug` is kept only as the
-dataset-directory prefix and just tracks the first species.
+Species is just another classification measurement (see the table above) —
+one class per species you collect, admin-extensible from `/admin/schema` like
+`disease`. There's no separate species list, no "active species" toggle, and
+no cap of one species per deployment; the dataset directory isn't
+species-scoped either.
 
 Split ratio: **70% train / 15% validation / 15% test**, applied by the
 retrain pipeline (`ml/scripts/split_dataset.py`'s `split_class`) with a fixed

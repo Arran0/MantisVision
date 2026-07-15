@@ -109,10 +109,6 @@ export async function POST(request: NextRequest) {
   const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
   const isBackground = !!primary && primaryValue === primary.background_class;
 
-  const activeSpeciesName =
-    schema.species.find((s) => s.slug === schema.active_species_slug)?.name ?? schema.species[0]?.name ?? null;
-  const species = isBackground ? null : stringOrNull(formData.get("species")) ?? activeSpeciesName;
-
   const storagePath = `${primaryValue ?? "uncategorized"}/${crypto.randomUUID()}.${extensionFor(file)}`;
 
   const { error: uploadError } = await admin.storage
@@ -127,7 +123,9 @@ export async function POST(request: NextRequest) {
   // measurement keys (for existing queries/back-compat); they're no longer
   // the source of truth for training — `measurements` is. Both the new keys
   // and the pre-restructure names are accepted so a mixed dataset keeps
-  // filling these columns.
+  // filling these columns. Species and colour are just schema classifications
+  // now (measurements["species"] / measurements["colour"]), same as any other
+  // — no more special-cased form fields or a schema-level "active species".
   const measurementString = (...keys: string[]): string | null => {
     for (const key of keys) if (typeof measurements[key] === "string") return measurements[key] as string;
     return null;
@@ -148,10 +146,8 @@ export async function POST(request: NextRequest) {
       dried_pct: measurementNumber("dried", "dried_extent"),
       decayed_pct: measurementNumber("decayed", "decayed_extent"),
       is_background: isBackground,
-      species,
-      // Colour is now a schema classification (measurements["colour"]); fall
-      // back to a legacy free-text colour field if one is still submitted.
-      colour: isBackground ? null : measurementString("colour") ?? stringOrNull(formData.get("colour")),
+      species: measurementString("species"),
+      colour: measurementString("colour"),
       notes: stringOrNull(formData.get("notes")),
     })
     .select()

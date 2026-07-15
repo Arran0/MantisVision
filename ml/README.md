@@ -33,9 +33,10 @@ ml/
   metadata/schema.json    # the active measurement schema, exported from Supabase
                           # (see scripts/export_schema.py) — absent locally is fine,
                           # config.py falls back to DEFAULT_SCHEMA
-  dataset/<species_slug>/{train,validation,test}/
+  dataset/{train,validation,test}/
                           # images/, masks/<measurement_key>/, annotations.jsonl
-                          # (per-image column annotations — no class folders)
+                          # (per-image column annotations — no class folders,
+                          # not species-scoped — species is a column too)
                           # lives on Kaggle, gitignored here
   checkpoints/             # saved model weights (gitignored)
   reports/                 # evaluation outputs: confusion matrix, metrics json (gitignored)
@@ -92,7 +93,7 @@ uvicorn src.api.main:app --reload --port 8000
 python scripts/export_model.py
 ```
 
-The measurement schema (species, measurements, classes, display thresholds)
-is admin-editable at `/admin/schema` and versioned in Supabase — see
+The measurement schema (measurements — including species — classes, display
+thresholds) is admin-editable at `/admin/schema` and versioned in Supabase — see
 [`../docs/DATASET_LABELING_GUIDE.md`](../docs/DATASET_LABELING_GUIDE.md) for
 how per-image annotations are structured and labeled.

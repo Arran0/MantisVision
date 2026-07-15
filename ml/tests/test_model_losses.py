@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import torch
 
-from config import AppliesWhen, ClassDef, Config, MeasurementDef, SegClassDef, Schema, SpeciesDef, schema_to_dict, schema_from_dict
+from config import AppliesWhen, ClassDef, Config, MeasurementDef, SegClassDef, Schema, schema_to_dict, schema_from_dict
 from src.losses import build_criterions, compute_losses
 from src.models.efficientnet import build_model, load_checkpoint, save_checkpoint
 
@@ -34,8 +34,6 @@ def _schema_with_all_three_types() -> Schema:
         seg_classes=[SegClassDef(name="background", color="#000000"), SegClassDef(name="algae", color="#22c55e")],
     )
     return Schema(
-        species=[SpeciesDef(name="Test species", slug="Test_species")],
-        active_species_slug="Test_species",
         health_moderate_min=45.0,
         health_healthy_min=75.0,
         measurements=[condition, health, biofouling],

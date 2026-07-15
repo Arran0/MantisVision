@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from config import AppliesWhen, ClassDef, MeasurementDef, Schema, SpeciesDef
+from config import AppliesWhen, ClassDef, MeasurementDef, Schema
 from src.data.annotations import AnnotationRow, derive_targets, load_manifest, load_segmentation_target, measurement_applies
 
 
@@ -37,8 +37,6 @@ def _tiny_schema() -> Schema:
         applies_when=AppliesWhen(key="condition", not_equals="Background"),
     )
     return Schema(
-        species=[SpeciesDef(name="Test species", slug="Test_species")],
-        active_species_slug="Test_species",
         health_moderate_min=45.0,
         health_healthy_min=75.0,
         measurements=[condition, subtype, health],

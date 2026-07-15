@@ -21,10 +21,12 @@ ml/reports/
 
 # Dataset images live on Kaggle (see ml/scripts/kaggle_sync.py), not git —
 # keep the folder structure (.gitkeep files) but ignore actual photos.
-# Layout is dataset/<species_slug>/{train,validation,test}/<class_folder>/*.
-ml/dataset/*/train/*/*
-ml/dataset/*/validation/*/*
-ml/dataset/*/test/*/*
+# Layout is dataset/{train,validation,test}/images|masks/<measurement_key>/*
+# + annotations.jsonl — not species-scoped (species is a per-image column,
+# see ml/config.py's DEFAULT_SCHEMA "species" measurement).
+ml/dataset/train/*
+ml/dataset/validation/*
+ml/dataset/test/*
 !ml/dataset/**/.gitkeep
 
 # label_map.csv is generated from the dataset by scripts/build_label_map.py.

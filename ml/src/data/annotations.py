@@ -2,7 +2,7 @@
 labels (src/data/labels.py's parse_class_folder) as the training pipeline's
 source of truth.
 
-A dataset split directory (dataset/<species_slug>/{train,validation,test}/)
+A dataset split directory (dataset/{train,validation,test}/)
 now holds:
 
     images/<filename>              the photo

@@ -6,7 +6,6 @@ import {
   DEFAULT_SCHEMA,
   classificationMeasurements,
   slugifyKey,
-  slugifySlug,
   validateSchema,
   type ClassDef,
   type MeasurementDef,
@@ -83,29 +82,6 @@ export function MeasurementSchemaEditor() {
     setDoc((prev) => ({ ...prev, ...next }));
   }
 
-  // active_species_slug is retained for schema/ML compatibility but is no
-  // longer a user-facing choice — it just tracks the first species so the doc
-  // stays valid. Keep it pointing at a real slug as the list changes.
-  function normalizeActiveSpecies(species: SchemaDoc["species"], current: string): string {
-    if (species.some((s) => s.slug === current)) return current;
-    return species[0]?.slug ?? current;
-  }
-
-  function patchSpeciesName(index: number, name: string) {
-    setDoc((prev) => {
-      const newSlug = slugifySlug(name);
-      const species = prev.species.map((s, j) => (j === index ? { name, slug: newSlug } : s));
-      return { ...prev, species, active_species_slug: normalizeActiveSpecies(species, prev.active_species_slug) };
-    });
-  }
-
-  function removeSpecies(index: number) {
-    setDoc((prev) => {
-      const species = prev.species.filter((_, j) => j !== index);
-      return { ...prev, species, active_species_slug: normalizeActiveSpecies(species, prev.active_species_slug) };
-    });
-  }
-
   function patchMeasurement(index: number, next: Partial<MeasurementDef>) {
     setDoc((prev) => ({
       ...prev,
@@ -172,39 +148,6 @@ export function MeasurementSchemaEditor() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Species -------------------------------------------------------- */}
-      <AdminCard className="flex flex-col gap-3 p-5">
-        <h2 className={sectionHeadingClass}>Species</h2>
-        <p className="text-sm text-zinc-600">
-          The species you can pick from when labeling a photo. Add one row per species you collect — no need to mark
-          one &ldquo;active&rdquo;.
-        </p>
-        {doc.species.map((s, i) => (
-          <div key={i} className="flex flex-wrap items-end gap-3">
-            <AdminField label="Name" className="flex-1 min-w-[10rem]">
-              <AdminInput value={s.name} onChange={(e) => patchSpeciesName(i, e.target.value)} />
-            </AdminField>
-            <AdminButton
-              type="button"
-              variant="ghost"
-              className="pb-2.5 text-rose-600 hover:bg-rose-50"
-              disabled={doc.species.length <= 1}
-              onClick={() => removeSpecies(i)}
-            >
-              Remove
-            </AdminButton>
-          </div>
-        ))}
-        <AdminButton
-          type="button"
-          variant="ghost"
-          className="self-start"
-          onClick={() => patch({ species: [...doc.species, { name: "New species", slug: slugifySlug("New species") }] })}
-        >
-          + Add species
-        </AdminButton>
-      </AdminCard>
-
       {/* Measurements ---------------------------------------------------- */}
       <div className="flex flex-col gap-3">
         <div>
@@ -213,8 +156,9 @@ export function MeasurementSchemaEditor() {
             Each measurement is one column collected per photo and one head the model predicts: a classification
             (named classes), a regression (a continuous value), or a segmentation (a per-pixel mask). The
             <span className="mx-1"><AdminBadge tone="ocean">Required</AdminBadge></span>
-            ones are the fixed backbone — you can&rsquo;t remove or retype them (for
-            <em> Disease</em> you can still add a class per named disease). Add your own below to teach the model a
+            ones are the fixed backbone — you can&rsquo;t remove or retype them, though <em>Species</em> and
+            <em> Disease</em> stay extensible: add one class per species or disease you want the model to recognise,
+            no need to mark any single one &ldquo;active&rdquo;. Add your own measurements below to teach the model a
             new metric; it stays untrained until labeled photos supply values for it.
           </p>
         </div>
