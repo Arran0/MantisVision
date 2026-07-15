@@ -44,8 +44,12 @@ REQUEST_TIMEOUT_S = 60
 
 
 def _supabase_env() -> tuple[str, str]:
-    url = os.environ["SUPABASE_URL"].rstrip("/")
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    # .strip() guards against a stray trailing newline/whitespace in the
+    # secret value (e.g. from a copy-paste into the GitHub secret field) —
+    # that would otherwise reach http.client as a literal "\n" in the
+    # Authorization header value and raise "Invalid header value".
+    url = os.environ["SUPABASE_URL"].strip().rstrip("/")
+    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"].strip()
     return url, key
 
 
