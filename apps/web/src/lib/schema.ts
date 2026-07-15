@@ -9,9 +9,11 @@
 // measurements with no ground-truth data yet simply stay masked (untrained)
 // until values arrive.
 //
-// Species is just another classification measurement (see DEFAULT_SCHEMA
-// below) — one class per species — not a special schema-level concept with
-// a single "active" one.
+// Species is just another classification measurement — one class per
+// species — not a special schema-level concept with a single "active" one.
+// Unlike the rest of DEFAULT_SCHEMA below, it isn't part of the starting
+// set at all: an admin adds it themselves from the Structure editor once
+// they know which species they're tracking, with no preset class baked in.
 //
 // This module holds the shared TypeScript shape, the DEFAULT_SCHEMA fallback
 // (kept in sync with the SQL seed in
@@ -36,6 +38,18 @@ export interface ClassDef {
 export interface SegClassDef {
   name: string;
   color: string; // hex, e.g. "#22c55e" — used for the mask legend/overlay
+}
+
+// A band of a regression measurement's predicted value, with its own preset
+// explanation/recommendation copy — e.g. 0-30 "Low severity", 31-60
+// "Moderate severity", 61-100 "Severe". Half-open on the low end: a value
+// matches the first range with min <= value <= max, so ranges should be
+// contiguous and non-overlapping (validated in validateSchema below).
+export interface RangeDef {
+  min: number;
+  max: number;
+  explanation?: string;
+  recommendation?: string;
 }
 
 // One gating condition: a classification measurement (`key`) must equal (or
@@ -66,6 +80,11 @@ export interface MeasurementDef {
   unit?: string;
   min?: number;
   max?: number;
+  // Optional preset explanation/recommendation copy per band of the
+  // predicted value (e.g. "0-30 -> Low severity"). No admin UI forces this
+  // to cover the whole [min, max] span — a value outside every range simply
+  // gets no preset copy.
+  ranges?: RangeDef[];
   // segmentation only
   seg_classes?: SegClassDef[];
 }
@@ -128,16 +147,11 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
         },
       ],
     },
-    // Species is just another classification: one class per species you
-    // collect — add a class per new species, same as any other measurement.
-    {
-      key: "species",
-      label: "Species",
-      type: "classification",
-      loss_weight: 1.0,
-      applies_when: WHEN_SEAWEED_PRESENT,
-      classes: [{ name: "Kappaphycus_alvarezii" }],
-    },
+    // Species is just another classification, same as any other measurement
+    // — but unlike the rest of this starting set, it has no default class:
+    // which species you're tracking is entirely up to you. Add it yourself
+    // from the Structure editor ("+ Add measurement") with one class per
+    // species you actually collect.
     // The overall health label — an explicit class, not a bucketed score.
     {
       key: "health_status",
@@ -267,6 +281,12 @@ export function classNames(measurement: MeasurementDef): string[] {
   return (measurement.classes ?? []).map((c) => c.name);
 }
 
+// The first range (of a regression measurement) that `value` falls into, if
+// any. Mirrors MeasurementDef.range_for in ml/config.py — keep both in sync.
+export function rangeForValue(measurement: MeasurementDef, value: number): RangeDef | undefined {
+  return (measurement.ranges ?? []).find((r) => value >= r.min && value <= r.max);
+}
+
 // Whether `measurement` is active given the current values of *other*
 // measurements (keyed by measurement key -> chosen class name). A measurement
 // with no applies_when (or an empty one) is always active; with several
@@ -381,6 +401,21 @@ export function validateSchema(doc: unknown): string | null {
     } else if (m.type === "regression") {
       if (typeof m.min !== "number" || typeof m.max !== "number" || !(m.min < m.max))
         return `Measurement ${m.key}: min and max must be numbers with min < max.`;
+      if (m.ranges && m.ranges.length > 0) {
+        const sorted = [...m.ranges].sort((a, b) => a.min - b.min);
+        for (const r of sorted) {
+          if (typeof r.min !== "number" || typeof r.max !== "number" || !(r.min < r.max))
+            return `Measurement ${m.key}: each range needs numeric min < max.`;
+          if (r.min < m.min || r.max > m.max)
+            return `Measurement ${m.key}: range ${r.min}–${r.max} must fall within ${m.min}–${m.max}.`;
+        }
+        for (let i = 1; i < sorted.length; i++) {
+          const prev = sorted[i - 1]!;
+          const curr = sorted[i]!;
+          if (curr.min < prev.max)
+            return `Measurement ${m.key}: ranges ${prev.min}–${prev.max} and ${curr.min}–${curr.max} overlap.`;
+        }
+      }
     } else if (m.type === "segmentation") {
       if (!Array.isArray(m.seg_classes) || m.seg_classes.length < 2)
         return `Measurement ${m.key}: segmentation needs at least 2 mask classes (e.g. background + one subject).`;

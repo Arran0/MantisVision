@@ -151,7 +151,10 @@ def test_fetch_active_schema_falls_back_to_default_when_no_row(mock_supabase, mo
     try:
         doc = fetch_active_schema()
         assert any(m["key"] == "seaweed_presence" for m in doc["measurements"])
-        assert any(m["key"] == "species" for m in doc["measurements"])
+        # Species has no preset class — an admin adds it themselves once they
+        # know which species they're tracking, so the fallback default schema
+        # doesn't declare a "species" measurement at all.
+        assert not any(m["key"] == "species" for m in doc["measurements"])
     finally:
         server.shutdown()
         thread.join(timeout=5)
