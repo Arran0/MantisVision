@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import torch
 
-from config import AppliesWhen, ClassDef, Config, MeasurementDef, SegClassDef, Schema, schema_to_dict, schema_from_dict
+from config import AppliesWhen, ClassDef, Config, MeasurementDef, RangeDef, SegClassDef, Schema, schema_to_dict, schema_from_dict
 from src.losses import build_criterions, compute_losses
 from src.models.efficientnet import build_model, load_checkpoint, save_checkpoint
 
@@ -183,3 +183,50 @@ def test_schema_to_dict_from_dict_round_trip():
     rebuilt = schema_from_dict(doc)
     assert [m.key for m in rebuilt.measurements] == [m.key for m in schema.measurements]
     assert rebuilt.find("biofouling").seg_classes[1].name == "algae"
+
+
+def test_regression_ranges_round_trip_through_dict():
+    severity = MeasurementDef(
+        key="disease_severity",
+        label="Disease severity",
+        type="regression",
+        loss_weight=0.5,
+        min=0.0,
+        max=100.0,
+        ranges=[
+            RangeDef(min=0.0, max=30.0, explanation="Mild.", recommendation="Monitor."),
+            RangeDef(min=30.0, max=100.0, explanation="Severe.", recommendation="Isolate immediately."),
+        ],
+    )
+    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[severity])
+
+    doc = schema_to_dict(schema)
+    rebuilt = schema_from_dict(doc)
+
+    rebuilt_severity = rebuilt.find("disease_severity")
+    assert len(rebuilt_severity.ranges) == 2
+    assert rebuilt_severity.ranges[0].explanation == "Mild."
+    assert rebuilt_severity.ranges[1].recommendation == "Isolate immediately."
+
+
+def test_range_for_picks_first_matching_band_and_none_outside_every_range():
+    severity = MeasurementDef(
+        key="disease_severity",
+        label="Disease severity",
+        type="regression",
+        loss_weight=0.5,
+        min=0.0,
+        max=100.0,
+        ranges=[
+            RangeDef(min=0.0, max=30.0, explanation="Mild."),
+            RangeDef(min=30.0, max=60.0, explanation="Moderate."),
+            RangeDef(min=60.0, max=100.0, explanation="Severe."),
+        ],
+    )
+    assert severity.range_for(15.0).explanation == "Mild."
+    assert severity.range_for(30.0).explanation == "Mild."  # boundary: first match wins
+    assert severity.range_for(45.0).explanation == "Moderate."
+    assert severity.range_for(100.0).explanation == "Severe."
+
+    unbanded = MeasurementDef(key="gel_strength", label="Gel strength", type="regression", loss_weight=0.5, min=0.0, max=2000.0)
+    assert unbanded.range_for(500.0) is None

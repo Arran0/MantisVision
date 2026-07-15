@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-from config import AppliesWhen, ClassDef, MeasurementDef, SegClassDef, Schema
+from config import AppliesWhen, ClassDef, MeasurementDef, RangeDef, SegClassDef, Schema
 from src.inference.predictor import Predictor
 from src.models.efficientnet import build_model, save_checkpoint
 
@@ -222,6 +222,82 @@ def test_segmentation_measurement_reports_coverage(tmp_path):
     assert seg_result.coverage["algae"] == 100.0
     assert seg_result.coverage["background"] == 0.0
     assert seg_result.mask_png_base64 == ""  # ENABLE_SEGMENTATION_OVERLAY unset by default
+
+
+def test_regression_measurement_surfaces_explanation_from_matching_range(tmp_path):
+    """A regression measurement with per-band ranges should populate its
+    MeasurementResult's explanation/recommendation from whichever range the
+    predicted value falls into, the regression analogue of a classification's
+    per-class ClassDef.explanation/recommendation."""
+    condition = MeasurementDef(
+        key="condition",
+        label="Condition",
+        type="classification",
+        loss_weight=1.0,
+        background_class="Background",
+        classes=[ClassDef(name="Background"), ClassDef(name="Disease")],
+    )
+    severity = MeasurementDef(
+        key="disease_severity",
+        label="Disease severity",
+        type="regression",
+        loss_weight=0.5,
+        min=0.0,
+        max=100.0,
+        applies_when=[AppliesWhen(key="condition", not_equals="Background")],
+        ranges=[
+            RangeDef(min=0.0, max=30.0, explanation="Mild severity.", recommendation="Keep monitoring."),
+            RangeDef(min=30.0, max=100.0, explanation="Severe.", recommendation="Isolate immediately."),
+        ],
+    )
+    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[condition, severity])
+
+    predictor = _make_predictor(
+        tmp_path, schema,
+        class_choice={"condition": "Disease"},
+        regression_values={"disease_severity": 72.0},
+        seg_class_choice={},
+    )
+    result = predictor.predict(_fake_image_bytes())
+
+    severity_result = result.measurements["disease_severity"]
+    assert severity_result.value == 72.0
+    assert severity_result.explanation == "Severe."
+    assert severity_result.recommendation == "Isolate immediately."
+
+
+def test_regression_measurement_masked_by_applies_when_has_no_range_explanation(tmp_path):
+    condition = MeasurementDef(
+        key="condition",
+        label="Condition",
+        type="classification",
+        loss_weight=1.0,
+        background_class="Background",
+        classes=[ClassDef(name="Background"), ClassDef(name="Disease")],
+    )
+    severity = MeasurementDef(
+        key="disease_severity",
+        label="Disease severity",
+        type="regression",
+        loss_weight=0.5,
+        min=0.0,
+        max=100.0,
+        applies_when=[AppliesWhen(key="condition", not_equals="Background")],
+        ranges=[RangeDef(min=0.0, max=100.0, explanation="Severe.")],
+    )
+    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[condition, severity])
+
+    predictor = _make_predictor(
+        tmp_path, schema,
+        class_choice={"condition": "Background"},
+        regression_values={"disease_severity": 72.0},
+        seg_class_choice={},
+    )
+    result = predictor.predict(_fake_image_bytes())
+
+    severity_result = result.measurements["disease_severity"]
+    assert severity_result.value is None
+    assert severity_result.explanation is None
 
 
 def test_predictor_species_falls_back_to_unknown_when_schema_has_no_species_measurement(tmp_path):

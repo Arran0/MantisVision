@@ -11,6 +11,7 @@ import {
   type ClassDef,
   type MeasurementDef,
   type MeasurementType,
+  type RangeDef,
   type SegClassDef,
   type SchemaDoc,
 } from "@/lib/schema";
@@ -36,7 +37,7 @@ function defaultsForType(type: MeasurementType): Partial<MeasurementDef> {
     };
   }
   if (type === "regression") {
-    return { classes: undefined, background_class: undefined, unit: "", min: 0, max: 100, seg_classes: undefined };
+    return { classes: undefined, background_class: undefined, unit: "", min: 0, max: 100, ranges: [], seg_classes: undefined };
   }
   return {
     classes: undefined,
@@ -44,6 +45,7 @@ function defaultsForType(type: MeasurementType): Partial<MeasurementDef> {
     unit: undefined,
     min: undefined,
     max: undefined,
+    ranges: undefined,
     seg_classes: [
       { name: "background", color: "#000000" },
       { name: "subject", color: "#22c55e" },
@@ -121,6 +123,35 @@ export function MeasurementSchemaEditor() {
         const background_class = m.background_class === removedName ? null : m.background_class;
         return { ...m, classes, background_class };
       }),
+    }));
+  }
+
+  function addRange(measurementIndex: number) {
+    setDoc((prev) => ({
+      ...prev,
+      measurements: prev.measurements.map((m, i) =>
+        i === measurementIndex ? { ...m, ranges: [...(m.ranges ?? []), { min: m.min ?? 0, max: m.max ?? 100 }] } : m
+      ),
+    }));
+  }
+
+  function patchRange(measurementIndex: number, rangeIndex: number, next: Partial<RangeDef>) {
+    setDoc((prev) => ({
+      ...prev,
+      measurements: prev.measurements.map((m, i) =>
+        i === measurementIndex
+          ? { ...m, ranges: (m.ranges ?? []).map((r, j) => (j === rangeIndex ? { ...r, ...next } : r)) }
+          : m
+      ),
+    }));
+  }
+
+  function removeRange(measurementIndex: number, rangeIndex: number) {
+    setDoc((prev) => ({
+      ...prev,
+      measurements: prev.measurements.map((m, i) =>
+        i === measurementIndex ? { ...m, ranges: (m.ranges ?? []).filter((_, j) => j !== rangeIndex) } : m
+      ),
     }));
   }
 
@@ -405,24 +436,81 @@ export function MeasurementSchemaEditor() {
                       )}
 
                       {m.type === "regression" && (
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <AdminField label="Unit">
-                            <AdminInput value={m.unit ?? ""} onChange={(e) => patchMeasurement(i, { unit: e.target.value })} />
-                          </AdminField>
-                          <AdminField label="Min">
-                            <AdminInput
-                              type="number"
-                              value={m.min ?? 0}
-                              onChange={(e) => patchMeasurement(i, { min: Number(e.target.value) })}
-                            />
-                          </AdminField>
-                          <AdminField label="Max">
-                            <AdminInput
-                              type="number"
-                              value={m.max ?? 100}
-                              onChange={(e) => patchMeasurement(i, { max: Number(e.target.value) })}
-                            />
-                          </AdminField>
+                        <div className="flex flex-col gap-3">
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <AdminField label="Unit">
+                              <AdminInput value={m.unit ?? ""} onChange={(e) => patchMeasurement(i, { unit: e.target.value })} />
+                            </AdminField>
+                            <AdminField label="Min">
+                              <AdminInput
+                                type="number"
+                                value={m.min ?? 0}
+                                onChange={(e) => patchMeasurement(i, { min: Number(e.target.value) })}
+                              />
+                            </AdminField>
+                            <AdminField label="Max">
+                              <AdminInput
+                                type="number"
+                                value={m.max ?? 100}
+                                onChange={(e) => patchMeasurement(i, { max: Number(e.target.value) })}
+                              />
+                            </AdminField>
+                          </div>
+
+                          <div className="flex flex-col gap-2 rounded-lg bg-zinc-50 p-3">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-ocean-600">
+                              Explanation / recommendation by range (optional)
+                            </span>
+                            <p className="-mt-1 text-xs text-zinc-500">
+                              Give different preset copy for different bands of the predicted value — e.g. 0–30 vs.
+                              31–60 vs. 61–100. A value outside every range below just gets no preset copy.
+                            </p>
+                            {(m.ranges ?? []).map((r, ri) => (
+                              <div key={ri} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
+                                <div className="flex items-end gap-3">
+                                  <AdminField label="From" className="w-24">
+                                    <AdminInput
+                                      type="number"
+                                      value={r.min}
+                                      onChange={(e) => patchRange(i, ri, { min: Number(e.target.value) })}
+                                    />
+                                  </AdminField>
+                                  <AdminField label="To" className="w-24">
+                                    <AdminInput
+                                      type="number"
+                                      value={r.max}
+                                      onChange={(e) => patchRange(i, ri, { max: Number(e.target.value) })}
+                                    />
+                                  </AdminField>
+                                  <AdminButton
+                                    type="button"
+                                    variant="ghost"
+                                    className="mb-0.5 text-rose-600 hover:bg-rose-50"
+                                    onClick={() => removeRange(i, ri)}
+                                  >
+                                    Remove
+                                  </AdminButton>
+                                </div>
+                                <AdminField label="Explanation (shown to end users)">
+                                  <AdminTextarea
+                                    rows={2}
+                                    value={r.explanation ?? ""}
+                                    onChange={(e) => patchRange(i, ri, { explanation: e.target.value })}
+                                  />
+                                </AdminField>
+                                <AdminField label="Recommendation">
+                                  <AdminTextarea
+                                    rows={2}
+                                    value={r.recommendation ?? ""}
+                                    onChange={(e) => patchRange(i, ri, { recommendation: e.target.value })}
+                                  />
+                                </AdminField>
+                              </div>
+                            ))}
+                            <AdminButton type="button" variant="ghost" className="self-start" onClick={() => addRange(i)}>
+                              + Add range
+                            </AdminButton>
+                          </div>
                         </div>
                       )}
 

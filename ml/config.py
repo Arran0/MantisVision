@@ -33,7 +33,6 @@ ML_ROOT = Path(__file__).resolve().parent
 # used to synthesize a schema for a checkpoint saved before schemas existed —
 # see legacy_schema_from_checkpoint). The real, admin-editable source of
 # truth is the measurement schema itself.
-DEFAULT_SPECIES_CLASS = "Kappaphycus_alvarezii"
 DEFAULT_CONDITION_CLASSES = ["Background", "Healthy", "Disease", "Decay", "Dried"]
 DEFAULT_DISEASE_SUBTYPES = ["IceIce", "Epiphyte", "Bacterial", "Bleaching", "Unknown"]
 
@@ -71,6 +70,18 @@ class SegClassDef:
 
 
 @dataclass
+class RangeDef:
+    """A band of a regression measurement's predicted value, with its own
+    preset explanation/recommendation copy. Mirrors RangeDef in
+    apps/web/src/lib/schema.ts — keep both in sync."""
+
+    min: float
+    max: float
+    explanation: str | None = None
+    recommendation: str | None = None
+
+
+@dataclass
 class AppliesWhen:
     key: str
     equals: str | None = None
@@ -91,10 +102,16 @@ class MeasurementDef:
     unit: str | None = None
     min: float = 0.0
     max: float = 100.0
+    ranges: list[RangeDef] = field(default_factory=list)
     seg_classes: list[SegClassDef] = field(default_factory=list)
 
     def class_names(self) -> list[str]:
         return [c.name for c in self.classes]
+
+    def range_for(self, value: float) -> RangeDef | None:
+        """The first range `value` falls into, if any. Mirrors rangeForValue
+        in apps/web/src/lib/schema.ts — keep both in sync."""
+        return next((r for r in self.ranges if r.min <= value <= r.max), None)
 
 
 @dataclass
@@ -135,6 +152,11 @@ def schema_from_dict(doc: dict) -> Schema:
     def _seg_class(d: dict) -> SegClassDef:
         return SegClassDef(name=d["name"], color=d.get("color", "#888888"))
 
+    def _range(d: dict) -> RangeDef:
+        return RangeDef(
+            min=float(d["min"]), max=float(d["max"]), explanation=d.get("explanation"), recommendation=d.get("recommendation")
+        )
+
     def _one_applies_when(d: dict) -> AppliesWhen:
         return AppliesWhen(key=d["key"], equals=d.get("equals"), not_equals=d.get("not_equals"))
 
@@ -160,6 +182,7 @@ def schema_from_dict(doc: dict) -> Schema:
             unit=d.get("unit"),
             min=float(d.get("min", 0.0)),
             max=float(d.get("max", 100.0)),
+            ranges=[_range(r) for r in d.get("ranges", [])],
             seg_classes=[_seg_class(c) for c in d.get("seg_classes", [])],
         )
 
@@ -201,6 +224,16 @@ def schema_to_dict(schema: Schema) -> dict:
             d["unit"] = m.unit
             d["min"] = m.min
             d["max"] = m.max
+            if m.ranges:
+                d["ranges"] = [
+                    {
+                        "min": r.min,
+                        "max": r.max,
+                        **({"explanation": r.explanation} if r.explanation is not None else {}),
+                        **({"recommendation": r.recommendation} if r.recommendation is not None else {}),
+                    }
+                    for r in m.ranges
+                ]
         elif m.type == "segmentation":
             d["seg_classes"] = [{"name": c.name, "color": c.color} for c in m.seg_classes]
         return d
@@ -256,17 +289,11 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
                     },
                 ],
             },
-            {
-                # Species is just another classification: one class per
-                # species — add a class per new species, same as any other
-                # measurement. No separate "active species" concept.
-                "key": "species",
-                "label": "Species",
-                "type": "classification",
-                "loss_weight": 1.0,
-                "applies_when": _WHEN_SEAWEED_PRESENT,
-                "classes": [{"name": DEFAULT_SPECIES_CLASS}],
-            },
+            # Species is just another classification, same as any other
+            # measurement — but it has no preset class here. An admin adds it
+            # themselves from the Structure editor once they know which
+            # species they're tracking; predictor.py already falls back to
+            # "Unknown species" for a schema with no "species" measurement.
             {
                 "key": "health_status",
                 "label": "Health status",

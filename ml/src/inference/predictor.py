@@ -7,9 +7,10 @@ current PWA keeps working unchanged. Used by the FastAPI inference service
 (src/api/main.py).
 
 Preset explanation/recommendation copy comes from the checkpoint's own
-schema now (ClassDef.explanation/recommendation/note), not a hardcoded
-dict — promoting a new checkpoint therefore hot-swaps both the model weights
-and this copy together.
+schema now (ClassDef.explanation/recommendation/note for a classification,
+RangeDef.explanation/recommendation per band of a regression's predicted
+value), not a hardcoded dict — promoting a new checkpoint therefore
+hot-swaps both the model weights and this copy together.
 """
 from __future__ import annotations
 
@@ -179,12 +180,13 @@ class Predictor:
                 )
             elif m.type == "regression":
                 raw = float(outputs[m.key].squeeze(0).item())
+                range_def = m.range_for(raw) if applies else None
                 measurements[m.key] = MeasurementResult(
                     type="regression",
                     value=round(raw, 1) if applies else None,
                     confidence=None,
-                    explanation=None,
-                    recommendation=None,
+                    explanation=(range_def.explanation if range_def else None),
+                    recommendation=(range_def.recommendation if range_def else None),
                     coverage=None,
                     mask_png_base64=None,
                 )
