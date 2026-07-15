@@ -7,6 +7,7 @@ import {
   classificationMeasurements,
   slugifyKey,
   validateSchema,
+  type AppliesWhen,
   type ClassDef,
   type MeasurementDef,
   type MeasurementType,
@@ -14,7 +15,6 @@ import {
   type SchemaDoc,
 } from "@/lib/schema";
 import {
-  AdminBadge,
   AdminButton,
   AdminCard,
   AdminField,
@@ -115,6 +115,40 @@ export function MeasurementSchemaEditor() {
     }));
   }
 
+  // applies_when is a list of AND-combined conditions — a measurement can
+  // depend on several sibling classifications at once (e.g. "only when
+  // seaweed_presence == Yes AND disease != NoDisease").
+  function addAppliesWhen(measurementIndex: number, firstClassification: MeasurementDef | undefined) {
+    setDoc((prev) => ({
+      ...prev,
+      measurements: prev.measurements.map((m, i) => {
+        if (i !== measurementIndex || !firstClassification) return m;
+        const cond: AppliesWhen = { key: firstClassification.key, equals: firstClassification.classes?.[0]?.name ?? "" };
+        return { ...m, applies_when: [...(m.applies_when ?? []), cond] };
+      }),
+    }));
+  }
+
+  function removeAppliesWhen(measurementIndex: number, condIndex: number) {
+    setDoc((prev) => ({
+      ...prev,
+      measurements: prev.measurements.map((m, i) =>
+        i === measurementIndex ? { ...m, applies_when: (m.applies_when ?? []).filter((_, j) => j !== condIndex) } : m
+      ),
+    }));
+  }
+
+  function patchAppliesWhen(measurementIndex: number, condIndex: number, next: AppliesWhen) {
+    setDoc((prev) => ({
+      ...prev,
+      measurements: prev.measurements.map((m, i) =>
+        i === measurementIndex
+          ? { ...m, applies_when: (m.applies_when ?? []).map((c, j) => (j === condIndex ? next : c)) }
+          : m
+      ),
+    }));
+  }
+
   async function save() {
     setError(null);
     setMessage(null);
@@ -154,62 +188,46 @@ export function MeasurementSchemaEditor() {
           <h2 className={`${sectionHeadingClass} mt-0`}>Measurements</h2>
           <p className="text-sm text-zinc-600">
             Each measurement is one column collected per photo and one head the model predicts: a classification
-            (named classes), a regression (a continuous value), or a segmentation (a per-pixel mask). The
-            <span className="mx-1"><AdminBadge tone="ocean">Required</AdminBadge></span>
-            ones are the fixed backbone — you can&rsquo;t remove or retype them, though <em>Species</em> and
-            <em> Disease</em> stay extensible: add one class per species or disease you want the model to recognise,
-            no need to mark any single one &ldquo;active&rdquo;. Add your own measurements below to teach the model a
-            new metric; it stays untrained until labeled photos supply values for it.
+            (named classes), a regression (a continuous value), or a segmentation (a per-pixel mask). Everything here
+            — label, type, classes, gating — is freely editable or removable. Add one to teach the model a new
+            metric; it stays untrained until labeled photos supply values for it.
           </p>
         </div>
         <AnimatePresence initial={false}>
           {doc.measurements.map((m, i) => {
-            const locked = !!m.locked;
-            // A locked classification whose class list is still meant to grow
-            // (e.g. Disease) keeps its class editors live; every other locked
-            // measurement is fully read-only.
-            const classesEditable = !locked || !!m.extensible_classes;
+            const appliesWhen = m.applies_when ?? [];
+            const availableParents = classifications.filter(
+              (c) => c.key !== m.key && !appliesWhen.some((cond) => cond.key === c.key)
+            );
             return (
-            <motion.div key={i} {...fade}>
-              <AdminCard className="flex flex-col gap-3 p-5">
-                <div className="flex flex-wrap items-end gap-3">
-                  <AdminField label="Label" className="flex-1 min-w-[10rem]">
-                    <AdminInput
-                      value={m.label}
-                      disabled={locked}
-                      onChange={(e) => patchMeasurementLabel(i, e.target.value)}
-                      placeholder="e.g. Gel strength"
-                    />
-                  </AdminField>
-                  <AdminField label="Type" className="min-w-[9rem]">
-                    <AdminSelect
-                      value={m.type}
-                      disabled={locked}
-                      onChange={(e) => {
-                        const type = e.target.value as MeasurementType;
-                        patchMeasurement(i, { type, ...defaultsForType(type) });
-                      }}
-                    >
-                      <option value="classification">Classification</option>
-                      <option value="regression">Regression</option>
-                      <option value="segmentation">Segmentation</option>
-                    </AdminSelect>
-                  </AdminField>
-                  <AdminField label="Loss weight" className="w-24">
-                    <AdminInput
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      value={m.loss_weight}
-                      disabled={locked}
-                      onChange={(e) => patchMeasurement(i, { loss_weight: Number(e.target.value) })}
-                    />
-                  </AdminField>
-                  {locked ? (
-                    <div className="mb-2.5">
-                      <AdminBadge tone="ocean">Required</AdminBadge>
-                    </div>
-                  ) : (
+              <motion.div key={i} {...fade}>
+                <AdminCard className="flex flex-col gap-3 p-5">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <AdminField label="Label" className="flex-1 min-w-[10rem]">
+                      <AdminInput value={m.label} onChange={(e) => patchMeasurementLabel(i, e.target.value)} placeholder="e.g. Gel strength" />
+                    </AdminField>
+                    <AdminField label="Type" className="min-w-[9rem]">
+                      <AdminSelect
+                        value={m.type}
+                        onChange={(e) => {
+                          const type = e.target.value as MeasurementType;
+                          patchMeasurement(i, { type, ...defaultsForType(type) });
+                        }}
+                      >
+                        <option value="classification">Classification</option>
+                        <option value="regression">Regression</option>
+                        <option value="segmentation">Segmentation</option>
+                      </AdminSelect>
+                    </AdminField>
+                    <AdminField label="Loss weight" className="w-24">
+                      <AdminInput
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={m.loss_weight}
+                        onChange={(e) => patchMeasurement(i, { loss_weight: Number(e.target.value) })}
+                      />
+                    </AdminField>
                     <AdminButton
                       type="button"
                       variant="ghost"
@@ -218,59 +236,54 @@ export function MeasurementSchemaEditor() {
                     >
                       Remove
                     </AdminButton>
-                  )}
-                </div>
-                <p className="-mt-1 text-xs text-zinc-400">
-                  Internal key: <code className="rounded bg-zinc-100 px-1 py-0.5">{m.key}</code>
-                  {locked
-                    ? " — fixed for this required measurement."
-                    : " — follows the label; renaming an existing measurement changes this, so already-collected values under the old key won’t carry over automatically."}
-                </p>
+                  </div>
+                  <p className="-mt-1 text-xs text-zinc-400">
+                    Internal key: <code className="rounded bg-zinc-100 px-1 py-0.5">{m.key}</code> — follows the label;
+                    renaming an existing measurement changes this, so already-collected values under the old key won&rsquo;t
+                    carry over automatically.
+                  </p>
 
-                {/* applies_when ------------------------------------------- */}
-                <div className="flex flex-wrap items-end gap-3 rounded-lg bg-zinc-50 p-3">
-                  <AdminField label="Only applies when" className="min-w-[10rem]">
-                    <AdminSelect
-                      value={m.applies_when?.key ?? ""}
-                      disabled={locked}
-                      onChange={(e) => {
-                        const key = e.target.value;
-                        if (!key) return patchMeasurement(i, { applies_when: null });
-                        patchMeasurement(i, {
-                          applies_when: {
-                            key,
-                            equals: classifications.find((c) => c.key === key)?.classes?.[0]?.name ?? "",
-                          },
-                        });
-                      }}
-                    >
-                      <option value="">— always —</option>
-                      {classifications
-                        .filter((c) => c.key !== m.key)
-                        .map((c) => (
-                          <option key={c.key} value={c.key}>
-                            {c.label}
-                          </option>
-                        ))}
-                    </AdminSelect>
-                  </AdminField>
-                  {m.applies_when &&
-                    (() => {
-                      const parent = classifications.find((c) => c.key === m.applies_when!.key);
+                  {/* applies_when — a repeatable list of AND-combined conditions -- */}
+                  <div className="flex flex-col gap-2 rounded-lg bg-zinc-50 p-3">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-ocean-600">
+                      Only applies when {appliesWhen.length > 1 ? "(all must hold)" : ""}
+                    </span>
+                    {appliesWhen.map((cond, ci) => {
+                      const parent = classifications.find((c) => c.key === cond.key);
                       return (
-                        <>
+                        <div key={ci} className="flex flex-wrap items-end gap-3">
+                          <AdminField label="Measurement" className="min-w-[10rem]">
+                            <AdminSelect
+                              value={cond.key}
+                              onChange={(e) => {
+                                const key = e.target.value;
+                                const target = classifications.find((c) => c.key === key);
+                                patchAppliesWhen(i, ci, { key, equals: target?.classes?.[0]?.name ?? "" });
+                              }}
+                            >
+                              {/* Include the condition's current parent even if it's
+                                  otherwise filtered out by availableParents (already
+                                  used by a sibling condition), so the select shows it. */}
+                              {[parent, ...availableParents]
+                                .filter((c): c is MeasurementDef => !!c)
+                                .filter((c, idx, arr) => arr.findIndex((x) => x.key === c.key) === idx)
+                                .map((c) => (
+                                  <option key={c.key} value={c.key}>
+                                    {c.label}
+                                  </option>
+                                ))}
+                            </AdminSelect>
+                          </AdminField>
                           <AdminField label="Comparison" className="min-w-[8rem]">
                             <AdminSelect
-                              value={m.applies_when!.equals !== undefined ? "equals" : "not_equals"}
-                              disabled={locked}
+                              value={cond.equals !== undefined ? "equals" : "not_equals"}
                               onChange={(e) => {
-                                const val = m.applies_when!.equals ?? m.applies_when!.not_equals ?? "";
-                                patchMeasurement(i, {
-                                  applies_when:
-                                    e.target.value === "equals"
-                                      ? { key: m.applies_when!.key, equals: val }
-                                      : { key: m.applies_when!.key, not_equals: val },
-                                });
+                                const val = cond.equals ?? cond.not_equals ?? "";
+                                patchAppliesWhen(
+                                  i,
+                                  ci,
+                                  e.target.value === "equals" ? { key: cond.key, equals: val } : { key: cond.key, not_equals: val }
+                                );
                               }}
                             >
                               <option value="equals">equals</option>
@@ -279,15 +292,14 @@ export function MeasurementSchemaEditor() {
                           </AdminField>
                           <AdminField label="Value" className="min-w-[8rem]">
                             <AdminSelect
-                              value={m.applies_when!.equals ?? m.applies_when!.not_equals ?? ""}
-                              disabled={locked}
+                              value={cond.equals ?? cond.not_equals ?? ""}
                               onChange={(e) => {
-                                const isEquals = m.applies_when!.equals !== undefined;
-                                patchMeasurement(i, {
-                                  applies_when: isEquals
-                                    ? { key: m.applies_when!.key, equals: e.target.value }
-                                    : { key: m.applies_when!.key, not_equals: e.target.value },
-                                });
+                                const isEquals = cond.equals !== undefined;
+                                patchAppliesWhen(
+                                  i,
+                                  ci,
+                                  isEquals ? { key: cond.key, equals: e.target.value } : { key: cond.key, not_equals: e.target.value }
+                                );
                               }}
                             >
                               {(parent?.classes ?? []).map((c) => (
@@ -297,146 +309,148 @@ export function MeasurementSchemaEditor() {
                               ))}
                             </AdminSelect>
                           </AdminField>
-                        </>
-                      );
-                    })()}
-                </div>
-
-                {/* Type-specific editor ------------------------------------ */}
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div key={m.type} {...fade} className="flex flex-col gap-3">
-                    {m.type === "classification" &&
-                      (m.classes ?? []).map((c, ci) => (
-                        <div key={ci} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
-                          <div className="flex items-end gap-3">
-                            <AdminField label="Class name" className="flex-1 min-w-[8rem]">
-                              <AdminInput
-                                value={c.name}
-                                disabled={!classesEditable}
-                                onChange={(e) => patchClass(i, ci, { name: e.target.value })}
-                              />
-                            </AdminField>
-                            {classesEditable && (
-                              <AdminButton
-                                type="button"
-                                variant="ghost"
-                                className="mb-0.5 text-rose-600 hover:bg-rose-50"
-                                disabled={(m.classes ?? []).length <= 1}
-                                onClick={() => patchMeasurement(i, { classes: (m.classes ?? []).filter((_, j) => j !== ci) })}
-                              >
-                                Remove
-                              </AdminButton>
-                            )}
-                          </div>
-                          <AdminField label="Explanation (shown to end users)">
-                            <AdminTextarea
-                              rows={2}
-                              value={c.explanation ?? ""}
-                              disabled={!classesEditable}
-                              onChange={(e) => patchClass(i, ci, { explanation: e.target.value })}
-                            />
-                          </AdminField>
-                          <AdminField label="Recommendation">
-                            <AdminTextarea
-                              rows={2}
-                              value={c.recommendation ?? ""}
-                              disabled={!classesEditable}
-                              onChange={(e) => patchClass(i, ci, { recommendation: e.target.value })}
-                            />
-                          </AdminField>
-                          <AdminField label="Note (appended to a parent measurement's recommendation, if any)">
-                            <AdminInput
-                              value={c.note ?? ""}
-                              disabled={!classesEditable}
-                              onChange={(e) => patchClass(i, ci, { note: e.target.value })}
-                            />
-                          </AdminField>
+                          <AdminButton
+                            type="button"
+                            variant="ghost"
+                            className="mb-0.5 text-rose-600 hover:bg-rose-50"
+                            onClick={() => removeAppliesWhen(i, ci)}
+                          >
+                            Remove condition
+                          </AdminButton>
                         </div>
-                      ))}
-                    {m.type === "classification" && classesEditable && (
+                      );
+                    })}
+                    {availableParents.length > 0 && (
                       <AdminButton
                         type="button"
                         variant="ghost"
                         className="self-start"
-                        onClick={() => patchMeasurement(i, { classes: [...(m.classes ?? []), { name: "" }] })}
+                        onClick={() => addAppliesWhen(i, availableParents[0])}
                       >
-                        + Add class
+                        + Add condition
                       </AdminButton>
                     )}
-
-                    {m.type === "regression" && (
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <AdminField label="Unit">
-                          <AdminInput
-                            value={m.unit ?? ""}
-                            disabled={locked}
-                            onChange={(e) => patchMeasurement(i, { unit: e.target.value })}
-                          />
-                        </AdminField>
-                        <AdminField label="Min">
-                          <AdminInput
-                            type="number"
-                            value={m.min ?? 0}
-                            disabled={locked}
-                            onChange={(e) => patchMeasurement(i, { min: Number(e.target.value) })}
-                          />
-                        </AdminField>
-                        <AdminField label="Max">
-                          <AdminInput
-                            type="number"
-                            value={m.max ?? 100}
-                            disabled={locked}
-                            onChange={(e) => patchMeasurement(i, { max: Number(e.target.value) })}
-                          />
-                        </AdminField>
-                      </div>
+                    {appliesWhen.length === 0 && (
+                      <p className="text-xs text-zinc-400">Always applies — no conditions set.</p>
                     )}
+                  </div>
 
-                    {m.type === "segmentation" && (
-                      <div className="flex flex-col gap-3">
-                        {(m.seg_classes ?? []).map((c, si) => (
-                          <div key={si} className="flex items-end gap-3">
-                            <AdminField label="Mask class name" className="flex-1 min-w-[8rem]">
-                              <AdminInput value={c.name} onChange={(e) => patchSegClass(i, si, { name: e.target.value })} />
-                            </AdminField>
-                            <AdminField label="Color" className="w-20">
-                              <input
-                                type="color"
-                                className="h-[2.375rem] w-full rounded-lg border border-zinc-300"
-                                value={c.color}
-                                onChange={(e) => patchSegClass(i, si, { color: e.target.value })}
+                  {/* Type-specific editor ------------------------------------ */}
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div key={m.type} {...fade} className="flex flex-col gap-3">
+                      {m.type === "classification" &&
+                        (m.classes ?? []).map((c, ci) => (
+                          <div key={ci} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
+                            <div className="flex items-end gap-3">
+                              <AdminField label="Class name" className="flex-1 min-w-[8rem]">
+                                <AdminInput value={c.name} onChange={(e) => patchClass(i, ci, { name: e.target.value })} />
+                              </AdminField>
+                              <AdminButton
+                                type="button"
+                                variant="ghost"
+                                className="mb-0.5 text-rose-600 hover:bg-rose-50"
+                                onClick={() => patchMeasurement(i, { classes: (m.classes ?? []).filter((_, j) => j !== ci) })}
+                              >
+                                Remove
+                              </AdminButton>
+                            </div>
+                            <AdminField label="Explanation (shown to end users)">
+                              <AdminTextarea
+                                rows={2}
+                                value={c.explanation ?? ""}
+                                onChange={(e) => patchClass(i, ci, { explanation: e.target.value })}
                               />
                             </AdminField>
-                            <AdminButton
-                              type="button"
-                              variant="ghost"
-                              className="mb-0.5 text-rose-600 hover:bg-rose-50"
-                              onClick={() =>
-                                patchMeasurement(i, { seg_classes: (m.seg_classes ?? []).filter((_, j) => j !== si) })
-                              }
-                            >
-                              Remove
-                            </AdminButton>
+                            <AdminField label="Recommendation">
+                              <AdminTextarea
+                                rows={2}
+                                value={c.recommendation ?? ""}
+                                onChange={(e) => patchClass(i, ci, { recommendation: e.target.value })}
+                              />
+                            </AdminField>
+                            <AdminField label="Note (appended to a parent measurement's recommendation, if any)">
+                              <AdminInput value={c.note ?? ""} onChange={(e) => patchClass(i, ci, { note: e.target.value })} />
+                            </AdminField>
                           </div>
                         ))}
+                      {m.type === "classification" && (
                         <AdminButton
                           type="button"
                           variant="ghost"
                           className="self-start"
-                          onClick={() =>
-                            patchMeasurement(i, {
-                              seg_classes: [...(m.seg_classes ?? []), { name: "", color: "#888888" }],
-                            })
-                          }
+                          onClick={() => patchMeasurement(i, { classes: [...(m.classes ?? []), { name: "" }] })}
                         >
-                          + Add mask class
+                          + Add class
                         </AdminButton>
-                      </div>
-                    )}
-                  </motion.div>
-                </AnimatePresence>
-              </AdminCard>
-            </motion.div>
+                      )}
+
+                      {m.type === "regression" && (
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <AdminField label="Unit">
+                            <AdminInput value={m.unit ?? ""} onChange={(e) => patchMeasurement(i, { unit: e.target.value })} />
+                          </AdminField>
+                          <AdminField label="Min">
+                            <AdminInput
+                              type="number"
+                              value={m.min ?? 0}
+                              onChange={(e) => patchMeasurement(i, { min: Number(e.target.value) })}
+                            />
+                          </AdminField>
+                          <AdminField label="Max">
+                            <AdminInput
+                              type="number"
+                              value={m.max ?? 100}
+                              onChange={(e) => patchMeasurement(i, { max: Number(e.target.value) })}
+                            />
+                          </AdminField>
+                        </div>
+                      )}
+
+                      {m.type === "segmentation" && (
+                        <div className="flex flex-col gap-3">
+                          {(m.seg_classes ?? []).map((c, si) => (
+                            <div key={si} className="flex items-end gap-3">
+                              <AdminField label="Mask class name" className="flex-1 min-w-[8rem]">
+                                <AdminInput value={c.name} onChange={(e) => patchSegClass(i, si, { name: e.target.value })} />
+                              </AdminField>
+                              <AdminField label="Color" className="w-20">
+                                <input
+                                  type="color"
+                                  className="h-[2.375rem] w-full rounded-lg border border-zinc-300"
+                                  value={c.color}
+                                  onChange={(e) => patchSegClass(i, si, { color: e.target.value })}
+                                />
+                              </AdminField>
+                              <AdminButton
+                                type="button"
+                                variant="ghost"
+                                className="mb-0.5 text-rose-600 hover:bg-rose-50"
+                                onClick={() =>
+                                  patchMeasurement(i, { seg_classes: (m.seg_classes ?? []).filter((_, j) => j !== si) })
+                                }
+                              >
+                                Remove
+                              </AdminButton>
+                            </div>
+                          ))}
+                          <AdminButton
+                            type="button"
+                            variant="ghost"
+                            className="self-start"
+                            onClick={() =>
+                              patchMeasurement(i, {
+                                seg_classes: [...(m.seg_classes ?? []), { name: "", color: "#888888" }],
+                              })
+                            }
+                          >
+                            + Add mask class
+                          </AdminButton>
+                        </div>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </AdminCard>
+              </motion.div>
             );
           })}
         </AnimatePresence>

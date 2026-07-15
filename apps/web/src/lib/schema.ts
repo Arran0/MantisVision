@@ -10,12 +10,12 @@
 // until values arrive.
 //
 // Species is just another classification measurement (see DEFAULT_SCHEMA
-// below) — one class per species, admin-extensible like "disease" — not a
-// special schema-level concept with a single "active" one.
+// below) — one class per species — not a special schema-level concept with
+// a single "active" one.
 //
 // This module holds the shared TypeScript shape, the DEFAULT_SCHEMA fallback
 // (kept in sync with the SQL seed in
-// supabase/migrations/20260715000007_species_as_classification.sql and
+// supabase/migrations/20260716000009_editable_schema_and_multi_condition_gating.sql and
 // ml/config.py's fallback), plus validation/derivation helpers usable from
 // both server and client code.
 
@@ -38,11 +38,9 @@ export interface SegClassDef {
   color: string; // hex, e.g. "#22c55e" — used for the mask legend/overlay
 }
 
-// Gates a measurement so it's only meaningful (supervised in training, shown
-// in the UI) when another classification measurement's value matches. E.g.
-// disease_subtype only applies_when condition equals "Disease"; health_score
-// applies_when condition not_equals "Background". Exactly one of
-// equals/not_equals should be set.
+// One gating condition: a classification measurement (`key`) must equal (or
+// not equal) a given class name. Exactly one of equals/not_equals should be
+// set.
 export interface AppliesWhen {
   key: string;
   equals?: string;
@@ -54,19 +52,13 @@ export interface MeasurementDef {
   label: string;
   type: MeasurementType;
   loss_weight: number;
-  applies_when?: AppliesWhen | null;
-  // A "must-required" measurement that ships with the app. Locked measurements
-  // can't be removed or have their key/type reconfigured from the admin
-  // Structure editor — they're the fixed backbone every dataset collects
-  // (seaweed presence, health status, the lab-quality metrics, …). Purely a
-  // UI/authoring guard; the ML pipeline treats a locked measurement like any
-  // other.
-  locked?: boolean;
-  // For a locked classification whose class list is still meant to grow (e.g.
-  // "disease" — the admin adds a class per named disease). When false/absent
-  // on a locked measurement, its classes are fixed too (e.g. colour's palette,
-  // health status' Healthy/Moderate/Low).
-  extensible_classes?: boolean;
+  // Gates a measurement so it's only meaningful (supervised in training,
+  // shown in the UI) when EVERY condition in this list holds — e.g.
+  // disease_severity applies_when [disease not_equals "NoDisease"]; a
+  // measurement can list several conditions (all must be satisfied,
+  // AND-combined) to depend on more than one sibling measurement at once.
+  // Absent/empty means "always applies".
+  applies_when?: AppliesWhen[] | null;
   // classification only
   background_class?: string | null; // name of the "no subject" class, if any
   classes?: ClassDef[];
@@ -94,18 +86,20 @@ export interface SchemaDoc {
 
 // "Seaweed present?" gates every subject-level measurement below: they only
 // apply when a specimen is actually in frame.
-const WHEN_SEAWEED_PRESENT: AppliesWhen = { key: "seaweed_presence", equals: "Yes" };
+const WHEN_SEAWEED_PRESENT: AppliesWhen[] = [{ key: "seaweed_presence", equals: "Yes" }];
 
-// A locked 0–100 (or other-range) lab/quality regression that ships as part of
-// the required schema. Keeps the long block below readable.
-function requiredRegression(
+// A 0–100 (or other-range) lab/quality regression. Keeps the long block below
+// readable. Everything here is a starting point, not a fixed backbone — any
+// of it (including seaweed_presence/species/health_status/disease/colour
+// below) can be freely edited or removed from the admin Structure editor.
+function labRegression(
   key: string,
   label: string,
   unit: string,
   max: number,
-  applies_when: AppliesWhen = WHEN_SEAWEED_PRESENT
+  applies_when: AppliesWhen[] = WHEN_SEAWEED_PRESENT
 ): MeasurementDef {
-  return { key, label, type: "regression", loss_weight: 0.5, unit, min: 0, max, applies_when, locked: true };
+  return { key, label, type: "regression", loss_weight: 0.5, unit, min: 0, max, applies_when };
 }
 
 // Fallback used when no schema row exists yet. Mirrors the SQL seed.
@@ -123,7 +117,6 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
       type: "classification",
       loss_weight: 1.0,
       background_class: "No",
-      locked: true,
       classes: [
         {
           name: "Yes",
@@ -138,17 +131,13 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
       ],
     },
     // Species is just another classification: one class per species you
-    // collect, admin-extensible (add a class per new species) — there's no
-    // separate "active species" concept, and no cap of one species per
-    // deployment.
+    // collect — add a class per new species, same as any other measurement.
     {
       key: "species",
       label: "Species",
       type: "classification",
       loss_weight: 1.0,
       applies_when: WHEN_SEAWEED_PRESENT,
-      locked: true,
-      extensible_classes: true,
       classes: [{ name: "Kappaphycus_alvarezii" }],
     },
     // The overall health label — an explicit class, not a bucketed score.
@@ -158,7 +147,6 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
       type: "classification",
       loss_weight: 1.0,
       applies_when: WHEN_SEAWEED_PRESENT,
-      locked: true,
       classes: [
         {
           name: "Healthy",
@@ -177,16 +165,14 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
         },
       ],
     },
-    // Named diseases + an explicit "no disease" class. Extensible: the admin
-    // adds one class per disease they want the model to recognise.
+    // Named diseases + an explicit "no disease" class. Add a class per
+    // disease you want the model to recognise.
     {
       key: "disease",
       label: "Disease",
       type: "classification",
       loss_weight: 0.5,
       applies_when: WHEN_SEAWEED_PRESENT,
-      locked: true,
-      extensible_classes: true,
       classes: [
         { name: "NoDisease", explanation: "No disease detected." },
         {
@@ -208,11 +194,10 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
       unit: "score",
       min: 0,
       max: 100,
-      applies_when: { key: "disease", not_equals: "NoDisease" },
-      locked: true,
+      applies_when: [{ key: "disease", not_equals: "NoDisease" }],
     },
-    requiredRegression("dried", "Dried", "%", 100),
-    requiredRegression("decayed", "Decayed", "%", 100),
+    labRegression("dried", "Dried", "%", 100),
+    labRegression("decayed", "Decayed", "%", 100),
     // Observed colour, a fixed palette (not free text).
     {
       key: "colour",
@@ -220,7 +205,6 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
       type: "classification",
       loss_weight: 0.5,
       applies_when: WHEN_SEAWEED_PRESENT,
-      locked: true,
       classes: [
         { name: "Green" },
         { name: "Red" },
@@ -232,28 +216,21 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
       ],
     },
     // Lab / quality-assay metrics.
-    requiredRegression("carrageenan_yield", "Carrageenan Yield", "%", 100),
-    requiredRegression("gel_strength", "Gel Strength", "g/cm²", 2000),
-    requiredRegression("viscosity", "Viscosity", "cP", 1000),
-    requiredRegression("daily_growth_rate", "Daily Growth Rate", "%/day", 100),
-    requiredRegression("mineral_ca", "Mineral Content — Ca", "mg/kg", 100000),
-    requiredRegression("mineral_mg", "Mineral Content — Mg", "mg/kg", 100000),
-    requiredRegression("mineral_k", "Mineral Content — K", "mg/kg", 100000),
-    requiredRegression("mineral_na", "Mineral Content — Na", "mg/kg", 100000),
-    requiredRegression("caw", "Clean Anhydrous Weed (CAW)", "%", 100),
-    requiredRegression("impurities", "Impurities", "%", 100),
-    requiredRegression("sulfate_content", "Sulfate Content", "%", 100),
-    requiredRegression("acid_insoluble_ash", "Acid-Insoluble Ash", "%", 100),
-    requiredRegression("ash_content", "Ash Content", "%", 100),
+    labRegression("carrageenan_yield", "Carrageenan Yield", "%", 100),
+    labRegression("gel_strength", "Gel Strength", "g/cm²", 2000),
+    labRegression("viscosity", "Viscosity", "cP", 1000),
+    labRegression("daily_growth_rate", "Daily Growth Rate", "%/day", 100),
+    labRegression("mineral_ca", "Mineral Content — Ca", "mg/kg", 100000),
+    labRegression("mineral_mg", "Mineral Content — Mg", "mg/kg", 100000),
+    labRegression("mineral_k", "Mineral Content — K", "mg/kg", 100000),
+    labRegression("mineral_na", "Mineral Content — Na", "mg/kg", 100000),
+    labRegression("caw", "Clean Anhydrous Weed (CAW)", "%", 100),
+    labRegression("impurities", "Impurities", "%", 100),
+    labRegression("sulfate_content", "Sulfate Content", "%", 100),
+    labRegression("acid_insoluble_ash", "Acid-Insoluble Ash", "%", 100),
+    labRegression("ash_content", "Ash Content", "%", 100),
   ],
 };
-
-// The keys of every locked (must-required) measurement, derived from
-// DEFAULT_SCHEMA so there's a single source of truth. Used by the admin
-// editor (to lock controls) and validation (to reject removing them).
-export const REQUIRED_MEASUREMENT_KEYS: readonly string[] = DEFAULT_SCHEMA.measurements
-  .filter((m) => m.locked)
-  .map((m) => m.key);
 
 // --- Derivation helpers ----------------------------------------------------
 
@@ -263,6 +240,22 @@ export function findMeasurement(doc: SchemaDoc, key: string): MeasurementDef | u
 
 export function classificationMeasurements(doc: SchemaDoc): MeasurementDef[] {
   return doc.measurements.filter((m) => m.type === "classification");
+}
+
+// applies_when used to be a single condition object; it's now a list of
+// AND-combined conditions. Normalizes a doc loaded from storage (or a
+// hand-crafted payload) so a measurement whose applies_when is still the old
+// single-object shape becomes a one-element list, and anything else
+// (already a list, or null/absent) passes through unchanged.
+export function normalizeSchemaDoc(doc: SchemaDoc): SchemaDoc {
+  return {
+    ...doc,
+    measurements: doc.measurements.map((m) => {
+      const aw = m.applies_when as unknown;
+      if (aw && !Array.isArray(aw)) return { ...m, applies_when: [aw as AppliesWhen] };
+      return m;
+    }),
+  };
 }
 
 // The measurement that flags "no subject in frame" (analogous to the old
@@ -278,17 +271,20 @@ export function classNames(measurement: MeasurementDef): string[] {
 
 // Whether `measurement` is active given the current values of *other*
 // measurements (keyed by measurement key -> chosen class name). A measurement
-// with no applies_when is always active. Values are read as unknown so this
-// works with both the client's Record<string,string> class-value state and
-// the server's parsed-JSON measurements payload.
+// with no applies_when (or an empty one) is always active; with several
+// conditions, every one of them must hold (AND). Values are read as unknown
+// so this works with both the client's Record<string,string> class-value
+// state and the server's parsed-JSON measurements payload.
 export function measurementApplies(measurement: MeasurementDef, values: Record<string, unknown>): boolean {
-  const cond = measurement.applies_when;
-  if (!cond) return true;
-  const parentValue = values[cond.key];
-  if (parentValue === undefined || parentValue === null) return false;
-  if (cond.equals !== undefined) return parentValue === cond.equals;
-  if (cond.not_equals !== undefined) return parentValue !== cond.not_equals;
-  return true;
+  const conditions = measurement.applies_when;
+  if (!conditions || conditions.length === 0) return true;
+  return conditions.every((cond) => {
+    const parentValue = values[cond.key];
+    if (parentValue === undefined || parentValue === null) return false;
+    if (cond.equals !== undefined) return parentValue === cond.equals;
+    if (cond.not_equals !== undefined) return parentValue !== cond.not_equals;
+    return true;
+  });
 }
 
 // Whether `value` is a legal value for `measurement` (ignoring applies_when —
@@ -401,33 +397,27 @@ export function validateSchema(doc: unknown): string | null {
       }
     }
 
-    if (m.applies_when) {
-      const { key, equals, not_equals } = m.applies_when;
-      if (key === m.key) return `Measurement ${m.key}: applies_when cannot reference itself.`;
-      const parent = t.measurements.find((p) => p.key === key);
-      if (!parent) return `Measurement ${m.key}: applies_when references unknown measurement ${JSON.stringify(key)}.`;
-      if (parent.type !== "classification")
-        return `Measurement ${m.key}: applies_when must reference a classification measurement.`;
-      if ((equals === undefined) === (not_equals === undefined))
-        return `Measurement ${m.key}: applies_when must set exactly one of equals/not_equals.`;
-      const targetValue = (equals ?? not_equals) as string;
-      if (!(parent.classes ?? []).some((c) => c.name === targetValue))
-        return `Measurement ${m.key}: applies_when value ${JSON.stringify(targetValue)} is not a class of ${parent.key}.`;
+    if (m.applies_when && m.applies_when.length > 0) {
+      const seenKeys = new Set<string>();
+      for (const { key, equals, not_equals } of m.applies_when) {
+        if (key === m.key) return `Measurement ${m.key}: applies_when cannot reference itself.`;
+        if (seenKeys.has(key)) return `Measurement ${m.key}: applies_when lists ${JSON.stringify(key)} more than once.`;
+        seenKeys.add(key);
+        const parent = t.measurements.find((p) => p.key === key);
+        if (!parent) return `Measurement ${m.key}: applies_when references unknown measurement ${JSON.stringify(key)}.`;
+        if (parent.type !== "classification")
+          return `Measurement ${m.key}: applies_when must reference a classification measurement.`;
+        if ((equals === undefined) === (not_equals === undefined))
+          return `Measurement ${m.key}: applies_when must set exactly one of equals/not_equals.`;
+        const targetValue = (equals ?? not_equals) as string;
+        if (!(parent.classes ?? []).some((c) => c.name === targetValue))
+          return `Measurement ${m.key}: applies_when value ${JSON.stringify(targetValue)} is not a class of ${parent.key}.`;
+      }
     }
   }
 
   if (!t.measurements.some((m) => m.type === "classification" && m.background_class))
     return "At least one classification measurement must declare a background_class (a \"no subject\" class), so the model has negatives to train against.";
-
-  // Locked, must-required measurements can't be dropped or retyped (the admin
-  // editor enforces this in the UI; this guards the API against a hand-edited
-  // payload that removes them).
-  for (const req of DEFAULT_SCHEMA.measurements.filter((m) => m.locked)) {
-    const found = t.measurements.find((m) => m.key === req.key);
-    if (!found) return `Required measurement ${JSON.stringify(req.key)} (${req.label}) cannot be removed.`;
-    if (found.type !== req.type)
-      return `Required measurement ${JSON.stringify(req.key)} must stay a ${req.type}.`;
-  }
 
   return null;
 }

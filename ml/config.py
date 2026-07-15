@@ -9,9 +9,9 @@ it grows one head per measurement the active Schema defines — classification,
 regression, or segmentation — rather than a fixed set. There are no class
 folders anywhere in this pipeline; per-image ground truth is a column/CSV-
 style manifest (see src/data/annotations.py). Species is one such
-measurement too (see DEFAULT_SCHEMA below) — a normal, admin-extensible
-classification, not a schema-level "active species" concept, so the dataset
-directory is no longer species-scoped (see Config.dataset_dir).
+measurement too (see DEFAULT_SCHEMA below) — a normal classification, not a
+schema-level "active species" concept, so the dataset directory is no longer
+species-scoped (see Config.dataset_dir).
 
 health_status (Healthy/Moderate/Low) is a labeled classification the admin
 assigns per image, not a bucket derived from a score. health_moderate_min/
@@ -83,13 +83,9 @@ class MeasurementDef:
     label: str
     type: str  # "classification" | "regression" | "segmentation"
     loss_weight: float = 1.0
-    applies_when: AppliesWhen | None = None
-    # Authoring-only flags (mirrors apps/web/src/lib/schema.ts): `locked` marks
-    # a must-required measurement the admin UI won't let you remove/retype;
-    # `extensible_classes` allows adding classes to an otherwise-locked
-    # classification (e.g. "disease"). The ML pipeline ignores both.
-    locked: bool = False
-    extensible_classes: bool = False
+    # A list of AND-combined conditions (every one must hold for the
+    # measurement to apply) — empty/absent means "always applies".
+    applies_when: list[AppliesWhen] = field(default_factory=list)
     background_class: str | None = None
     classes: list[ClassDef] = field(default_factory=list)
     unit: str | None = None
@@ -118,19 +114,17 @@ class Schema:
 
     def applies(self, measurement: MeasurementDef, values: dict) -> bool:
         """Whether `measurement` is active given the current values of other
-        measurements (keyed by measurement key -> class name). Mirrors
-        measurementApplies in apps/web/src/lib/schema.ts exactly — keep both
-        in sync."""
-        cond = measurement.applies_when
-        if cond is None:
-            return True
-        parent_value = values.get(cond.key)
-        if parent_value is None:
-            return False
-        if cond.equals is not None:
-            return parent_value == cond.equals
-        if cond.not_equals is not None:
-            return parent_value != cond.not_equals
+        measurements (keyed by measurement key -> class name) — every
+        condition in applies_when must hold (AND). Mirrors measurementApplies
+        in apps/web/src/lib/schema.ts exactly — keep both in sync."""
+        for cond in measurement.applies_when:
+            parent_value = values.get(cond.key)
+            if parent_value is None:
+                return False
+            if cond.equals is not None and parent_value != cond.equals:
+                return False
+            if cond.not_equals is not None and parent_value == cond.not_equals:
+                return False
         return True
 
 
@@ -141,10 +135,18 @@ def schema_from_dict(doc: dict) -> Schema:
     def _seg_class(d: dict) -> SegClassDef:
         return SegClassDef(name=d["name"], color=d.get("color", "#888888"))
 
-    def _applies_when(d: dict | None) -> AppliesWhen | None:
-        if not d:
-            return None
+    def _one_applies_when(d: dict) -> AppliesWhen:
         return AppliesWhen(key=d["key"], equals=d.get("equals"), not_equals=d.get("not_equals"))
+
+    def _applies_when(raw: object) -> list[AppliesWhen]:
+        # applies_when used to be a single condition object; it's now a list
+        # of AND-combined conditions. Accept both shapes so a schema doc
+        # saved before this change still loads.
+        if not raw:
+            return []
+        if isinstance(raw, list):
+            return [_one_applies_when(c) for c in raw]
+        return [_one_applies_when(raw)]
 
     def _measurement(d: dict) -> MeasurementDef:
         return MeasurementDef(
@@ -153,8 +155,6 @@ def schema_from_dict(doc: dict) -> Schema:
             type=d["type"],
             loss_weight=float(d.get("loss_weight", 1.0)),
             applies_when=_applies_when(d.get("applies_when")),
-            locked=bool(d.get("locked", False)),
-            extensible_classes=bool(d.get("extensible_classes", False)),
             background_class=d.get("background_class"),
             classes=[_class(c) for c in d.get("classes", [])],
             unit=d.get("unit"),
@@ -183,17 +183,16 @@ def schema_to_dict(schema: Schema) -> dict:
 
     def _measurement(m: MeasurementDef) -> dict:
         d = {"key": m.key, "label": m.label, "type": m.type, "loss_weight": m.loss_weight}
-        if m.applies_when is not None:
-            aw = {"key": m.applies_when.key}
-            if m.applies_when.equals is not None:
-                aw["equals"] = m.applies_when.equals
-            if m.applies_when.not_equals is not None:
-                aw["not_equals"] = m.applies_when.not_equals
-            d["applies_when"] = aw
-        if m.locked:
-            d["locked"] = True
-        if m.extensible_classes:
-            d["extensible_classes"] = True
+        if m.applies_when:
+            aws = []
+            for cond in m.applies_when:
+                aw = {"key": cond.key}
+                if cond.equals is not None:
+                    aw["equals"] = cond.equals
+                if cond.not_equals is not None:
+                    aw["not_equals"] = cond.not_equals
+                aws.append(aw)
+            d["applies_when"] = aws
         if m.background_class is not None:
             d["background_class"] = m.background_class
         if m.type == "classification":
@@ -213,13 +212,15 @@ def schema_to_dict(schema: Schema) -> dict:
     }
 
 
-# The fixed, must-required schema — kept in sync with
-# apps/web/src/lib/schema.ts's DEFAULT_SCHEMA and the SQL seed in
-# supabase/migrations/20260715000007_species_as_classification.sql.
-_WHEN_SEAWEED_PRESENT = {"key": "seaweed_presence", "equals": "Yes"}
+# The default schema — kept in sync with apps/web/src/lib/schema.ts's
+# DEFAULT_SCHEMA and the SQL seed in
+# supabase/migrations/20260716000009_editable_schema_and_multi_condition_gating.sql. Just a
+# starting point: every measurement here (including seaweed_presence) is
+# freely editable/removable from the admin Structure editor.
+_WHEN_SEAWEED_PRESENT = [{"key": "seaweed_presence", "equals": "Yes"}]
 
 
-def _required_regression(key: str, label: str, unit: str, max_value: float, applies_when: dict | None = None) -> dict:
+def _lab_regression(key: str, label: str, unit: str, max_value: float, applies_when: list | None = None) -> dict:
     return {
         "key": key,
         "label": label,
@@ -229,7 +230,6 @@ def _required_regression(key: str, label: str, unit: str, max_value: float, appl
         "min": 0.0,
         "max": max_value,
         "applies_when": applies_when if applies_when is not None else _WHEN_SEAWEED_PRESENT,
-        "locked": True,
     }
 
 
@@ -244,7 +244,6 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
                 "type": "classification",
                 "loss_weight": 1.0,
                 "background_class": "No",
-                "locked": True,
                 "classes": [
                     {
                         "name": "Yes",
@@ -260,15 +259,13 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
             },
             {
                 # Species is just another classification: one class per
-                # species, admin-extensible (add a class per new species) —
-                # no separate "active species" concept.
+                # species — add a class per new species, same as any other
+                # measurement. No separate "active species" concept.
                 "key": "species",
                 "label": "Species",
                 "type": "classification",
                 "loss_weight": 1.0,
                 "applies_when": _WHEN_SEAWEED_PRESENT,
-                "locked": True,
-                "extensible_classes": True,
                 "classes": [{"name": DEFAULT_SPECIES_CLASS}],
             },
             {
@@ -277,7 +274,6 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
                 "type": "classification",
                 "loss_weight": 1.0,
                 "applies_when": _WHEN_SEAWEED_PRESENT,
-                "locked": True,
                 "classes": [
                     {
                         "name": "Healthy",
@@ -302,8 +298,6 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
                 "type": "classification",
                 "loss_weight": 0.5,
                 "applies_when": _WHEN_SEAWEED_PRESENT,
-                "locked": True,
-                "extensible_classes": True,
                 "classes": [
                     {"name": "NoDisease", "explanation": "No disease detected."},
                     {"name": "IceIce", "note": "Symptoms resemble ice-ice: raise water movement and reduce stress from high temperature/low salinity."},
@@ -320,36 +314,34 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
                 "unit": "score",
                 "min": 0.0,
                 "max": 100.0,
-                "applies_when": {"key": "disease", "not_equals": "NoDisease"},
-                "locked": True,
+                "applies_when": [{"key": "disease", "not_equals": "NoDisease"}],
             },
-            _required_regression("dried", "Dried", "%", 100.0),
-            _required_regression("decayed", "Decayed", "%", 100.0),
+            _lab_regression("dried", "Dried", "%", 100.0),
+            _lab_regression("decayed", "Decayed", "%", 100.0),
             {
                 "key": "colour",
                 "label": "Colour",
                 "type": "classification",
                 "loss_weight": 0.5,
                 "applies_when": _WHEN_SEAWEED_PRESENT,
-                "locked": True,
                 "classes": [
                     {"name": "Green"}, {"name": "Red"}, {"name": "Brown"}, {"name": "Yellow"},
                     {"name": "Orange"}, {"name": "White"}, {"name": "Black"},
                 ],
             },
-            _required_regression("carrageenan_yield", "Carrageenan Yield", "%", 100.0),
-            _required_regression("gel_strength", "Gel Strength", "g/cm²", 2000.0),
-            _required_regression("viscosity", "Viscosity", "cP", 1000.0),
-            _required_regression("daily_growth_rate", "Daily Growth Rate", "%/day", 100.0),
-            _required_regression("mineral_ca", "Mineral Content — Ca", "mg/kg", 100000.0),
-            _required_regression("mineral_mg", "Mineral Content — Mg", "mg/kg", 100000.0),
-            _required_regression("mineral_k", "Mineral Content — K", "mg/kg", 100000.0),
-            _required_regression("mineral_na", "Mineral Content — Na", "mg/kg", 100000.0),
-            _required_regression("caw", "Clean Anhydrous Weed (CAW)", "%", 100.0),
-            _required_regression("impurities", "Impurities", "%", 100.0),
-            _required_regression("sulfate_content", "Sulfate Content", "%", 100.0),
-            _required_regression("acid_insoluble_ash", "Acid-Insoluble Ash", "%", 100.0),
-            _required_regression("ash_content", "Ash Content", "%", 100.0),
+            _lab_regression("carrageenan_yield", "Carrageenan Yield", "%", 100.0),
+            _lab_regression("gel_strength", "Gel Strength", "g/cm²", 2000.0),
+            _lab_regression("viscosity", "Viscosity", "cP", 1000.0),
+            _lab_regression("daily_growth_rate", "Daily Growth Rate", "%/day", 100.0),
+            _lab_regression("mineral_ca", "Mineral Content — Ca", "mg/kg", 100000.0),
+            _lab_regression("mineral_mg", "Mineral Content — Mg", "mg/kg", 100000.0),
+            _lab_regression("mineral_k", "Mineral Content — K", "mg/kg", 100000.0),
+            _lab_regression("mineral_na", "Mineral Content — Na", "mg/kg", 100000.0),
+            _lab_regression("caw", "Clean Anhydrous Weed (CAW)", "%", 100.0),
+            _lab_regression("impurities", "Impurities", "%", 100.0),
+            _lab_regression("sulfate_content", "Sulfate Content", "%", 100.0),
+            _lab_regression("acid_insoluble_ash", "Acid-Insoluble Ash", "%", 100.0),
+            _lab_regression("ash_content", "Ash Content", "%", 100.0),
         ],
     }
 )
@@ -423,7 +415,7 @@ def legacy_schema_from_checkpoint(payload: dict) -> Schema:
         label="Disease subtype",
         type="classification",
         loss_weight=0.5,
-        applies_when=AppliesWhen(key="condition", equals="Disease") if "Disease" in condition_classes else None,
+        applies_when=[AppliesWhen(key="condition", equals="Disease")] if "Disease" in condition_classes else [],
         classes=[
             ClassDef(name=name, note=_LEGACY_SUBTYPE_NOTES.get(name))
             for name in subtype_classes
@@ -438,7 +430,7 @@ def legacy_schema_from_checkpoint(payload: dict) -> Schema:
             unit=unit,
             min=0.0,
             max=100.0,
-            applies_when=AppliesWhen(key="condition", not_equals="Background"),
+            applies_when=[AppliesWhen(key="condition", not_equals="Background")],
         )
         for key, label, unit, weight in [
             ("health_score", "Health score", "score", 1.0),

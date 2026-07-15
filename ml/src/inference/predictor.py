@@ -97,8 +97,8 @@ def _augmented_recommendation(m: MeasurementDef, class_def: ClassDef | None, sch
         for child in schema.measurements:
             if child.type != "classification":
                 continue
-            cond = child.applies_when
-            if not cond or cond.key != m.key or cond.equals != class_def.name:
+            gates_on_this = any(cond.key == m.key and cond.equals == class_def.name for cond in child.applies_when)
+            if not gates_on_this:
                 continue
             child_class_name = predicted.get(child.key)
             child_class_def = next((c for c in child.classes if c.name == child_class_name), None)

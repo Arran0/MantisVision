@@ -35,7 +35,7 @@ def _schema() -> Schema:
         label="Disease subtype",
         type="classification",
         loss_weight=0.5,
-        applies_when=AppliesWhen(key="condition", equals="Disease"),
+        applies_when=[AppliesWhen(key="condition", equals="Disease")],
         classes=[ClassDef(name="IceIce", note="Raise water movement."), ClassDef(name="Unknown", note="Consult a specialist.")],
     )
     health_score = MeasurementDef(
@@ -45,7 +45,7 @@ def _schema() -> Schema:
         loss_weight=1.0,
         min=0.0,
         max=100.0,
-        applies_when=AppliesWhen(key="condition", not_equals="Background"),
+        applies_when=[AppliesWhen(key="condition", not_equals="Background")],
     )
     biofouling = MeasurementDef(
         key="biofouling",

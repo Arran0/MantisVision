@@ -52,8 +52,9 @@ Hand-editing the manifest directly is only for local experiments.
 ## The default measurement schema
 
 Out of the box (`DEFAULT_SCHEMA` in both `ml/config.py` and
-`apps/web/src/lib/schema.ts`) the schema is a fixed, **required** backbone of
-columns. The core ones:
+`apps/web/src/lib/schema.ts`) the schema ships with this starting set of
+columns — all of it freely editable or removable from `/admin/schema`,
+nothing is locked:
 
 | Measurement | Type | Values |
 |---|---|---|
@@ -65,18 +66,15 @@ columns. The core ones:
 | `dried` / `decayed` | regression 0–100 | continuous extents |
 | `colour` | classification, fixed palette | `Green`, `Red`, `Brown`, `Yellow`, `Orange`, `White`, `Black` |
 
-Plus a block of required lab/quality regressions: `carrageenan_yield` (%),
+Plus a block of lab/quality regressions: `carrageenan_yield` (%),
 `gel_strength` (g/cm²), `viscosity` (cP), `daily_growth_rate` (%/day),
 per-mineral content `mineral_ca`/`mineral_mg`/`mineral_k`/`mineral_na`
 (mg/kg), `caw` (%), `impurities` (%), `sulfate_content` (%),
 `acid_insoluble_ash` (%), and `ash_content` (%).
 
-Every one of these is **locked** — the admin Structure editor renders it
-read-only and the schema API rejects removing or retyping it — so the dataset
-always collects the same required columns. `species` and `disease` are the
-exceptions: their class lists are **extensible** — add one class per species
-or named disease you want the model to recognise (keep `NoDisease` as
-disease's negative).
+Add a class to `species` or `disease` (or any classification) the same way —
+edit it in `/admin/schema` (keep `NoDisease` as disease's negative if you want
+to keep that convention).
 
 `seaweed_presence` is the **primary classifier**: its `No` class (formerly
 "Background") is the schema's designated "no seaweed" class. Fill it with
@@ -89,17 +87,22 @@ assessment on an irrelevant photo.
 `Moderate` / `Low`), not a bucket derived from a numeric score. Pick the class
 that matches what the specimen actually looks like.
 
-You can still **add your own extra measurements** (another segmentation
-target, an additional lab value) in `/admin/schema` — that's an edit, not a
-code change; the model, losses, dataset loader, and predictor all grow the new
-head generically from the schema. A new measurement stays masked (untrained,
-no effect on other heads) until images with real values for it exist.
+You can add, edit, or remove any measurement (a lab value, another
+segmentation target, or one of the columns above) in `/admin/schema` — that's
+an edit, not a code change; the model, losses, dataset loader, and predictor
+all grow the new head generically from the schema. A new measurement stays
+masked (untrained, no effect on other heads) until images with real values
+for it exist.
+
+`applies_when` can list more than one condition — all of them must hold
+(AND) for the measurement to apply. Add another condition from the same
+"Only applies when" section in the Structure editor to gate a measurement on
+several sibling classifications at once.
 
 Species is just another classification measurement (see the table above) —
-one class per species you collect, admin-extensible from `/admin/schema` like
-`disease`. There's no separate species list, no "active species" toggle, and
-no cap of one species per deployment; the dataset directory isn't
-species-scoped either.
+one class per species you collect. There's no separate species list, no
+"active species" toggle, and no cap of one species per deployment; the
+dataset directory isn't species-scoped either.
 
 Split ratio: **70% train / 15% validation / 15% test**, applied by the
 retrain pipeline (`ml/scripts/split_dataset.py`'s `split_class`) with a fixed

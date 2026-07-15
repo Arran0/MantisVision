@@ -24,7 +24,7 @@ def _schema_with_all_three_types() -> Schema:
         loss_weight=1.0,
         min=0.0,
         max=100.0,
-        applies_when=AppliesWhen(key="condition", not_equals="Background"),
+        applies_when=[AppliesWhen(key="condition", not_equals="Background")],
     )
     biofouling = MeasurementDef(
         key="biofouling",
