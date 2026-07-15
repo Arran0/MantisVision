@@ -79,13 +79,16 @@ export interface MeasurementDef {
 }
 
 export interface SchemaDoc {
-  // Display-level thresholds applied uniformly to health_score for any
-  // non-background subject (see ml/src/inference/predictor.py): at or above
-  // health_healthy_min -> "Healthy"; at or above health_moderate_min (but
-  // below healthy) -> "Moderate"; otherwise "Low". No condition/class name is
-  // special-cased — the two cutoffs are the whole rule.
-  health_moderate_min: number;
-  health_healthy_min: number;
+  // Legacy display-level thresholds, relevant only to a schema whose health
+  // measurement is still a regressed health_score (see
+  // ml/src/inference/predictor.py's _derive_level fallback for a
+  // pre-restructure checkpoint): at or above health_healthy_min ->
+  // "Healthy"; at or above health_moderate_min (but below healthy) ->
+  // "Moderate"; otherwise "Low". The current required schema assigns
+  // health_status directly as a classification instead, so these are
+  // optional and have no admin UI of their own.
+  health_moderate_min?: number;
+  health_healthy_min?: number;
   measurements: MeasurementDef[];
 }
 
@@ -340,9 +343,18 @@ export function validateSchema(doc: unknown): string | null {
   if (typeof doc !== "object" || doc === null) return "Schema must be an object.";
   const t = doc as Partial<SchemaDoc>;
 
-  if (!isFraction(t.health_moderate_min)) return "health_moderate_min must be a number between 0 and 100.";
-  if (!isFraction(t.health_healthy_min)) return "health_healthy_min must be a number between 0 and 100.";
-  if (t.health_healthy_min <= t.health_moderate_min)
+  // Optional legacy thresholds — only validated if present at all, since the
+  // required schema no longer has any UI to set them (health_status is
+  // assigned directly as a classification now).
+  if (t.health_moderate_min !== undefined && !isFraction(t.health_moderate_min))
+    return "health_moderate_min must be a number between 0 and 100.";
+  if (t.health_healthy_min !== undefined && !isFraction(t.health_healthy_min))
+    return "health_healthy_min must be a number between 0 and 100.";
+  if (
+    t.health_moderate_min !== undefined &&
+    t.health_healthy_min !== undefined &&
+    t.health_healthy_min <= t.health_moderate_min
+  )
     return "health_healthy_min must be greater than health_moderate_min.";
 
   if (!Array.isArray(t.measurements) || t.measurements.length === 0)
