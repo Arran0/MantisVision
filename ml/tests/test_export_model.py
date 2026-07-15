@@ -42,8 +42,9 @@ def test_export_default_schema(tmp_path, monkeypatch):
     assert output_names == [m.key for m in DEFAULT_SCHEMA.measurements]
 
     result = sess.run(None, {"image": np.random.randn(1, 3, 224, 224).astype("float32")})
-    assert result[output_names.index("condition")].shape == (1, 5)
-    assert result[output_names.index("health_score")].shape == (1,)
+    assert result[output_names.index("seaweed_presence")].shape == (1, 2)  # Yes/No
+    assert result[output_names.index("health_status")].shape == (1, 3)  # Healthy/Moderate/Low
+    assert result[output_names.index("dried")].shape == (1,)  # regression
 
 
 def test_export_schema_with_segmentation_measurement(tmp_path, monkeypatch):

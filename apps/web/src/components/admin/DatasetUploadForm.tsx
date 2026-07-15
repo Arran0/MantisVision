@@ -25,7 +25,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   const [numberValues, setNumberValues] = useState<Record<string, string>>({});
   const [maskFiles, setMaskFiles] = useState<Record<string, File | null>>({});
 
-  const [colour, setColour] = useState("");
   const [notes, setNotes] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
@@ -63,7 +62,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
 
   function resetForm() {
     setFile(null);
-    setColour("");
     setNotes("");
     setNumberValues({});
     setMaskFiles({});
@@ -104,7 +102,6 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     }
     if (!isBackground) {
       formData.append("species", species);
-      formData.append("colour", colour);
     }
     formData.append("notes", notes);
 
@@ -191,19 +188,16 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
         })}
 
         {!isBackground && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <AdminField label="Species">
-              <AdminInput type="text" value={species} onChange={(event) => setSpecies(event.target.value)} />
-            </AdminField>
-            <AdminField label="Colour">
-              <AdminInput
-                type="text"
-                value={colour}
-                onChange={(event) => setColour(event.target.value)}
-                placeholder="e.g. dark green"
-              />
-            </AdminField>
-          </div>
+          <AdminField label="Species">
+            <AdminSelect required value={species} onChange={(event) => setSpecies(event.target.value)}>
+              {!schema.species.some((s) => s.name === species) && <option value="">— select —</option>}
+              {schema.species.map((s) => (
+                <option key={s.slug} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </AdminSelect>
+          </AdminField>
         )}
 
         <AdminField label="Notes">

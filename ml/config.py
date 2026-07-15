@@ -85,6 +85,12 @@ class MeasurementDef:
     type: str  # "classification" | "regression" | "segmentation"
     loss_weight: float = 1.0
     applies_when: AppliesWhen | None = None
+    # Authoring-only flags (mirrors apps/web/src/lib/schema.ts): `locked` marks
+    # a must-required measurement the admin UI won't let you remove/retype;
+    # `extensible_classes` allows adding classes to an otherwise-locked
+    # classification (e.g. "disease"). The ML pipeline ignores both.
+    locked: bool = False
+    extensible_classes: bool = False
     background_class: str | None = None
     classes: list[ClassDef] = field(default_factory=list)
     unit: str | None = None
@@ -150,6 +156,8 @@ def schema_from_dict(doc: dict) -> Schema:
             type=d["type"],
             loss_weight=float(d.get("loss_weight", 1.0)),
             applies_when=_applies_when(d.get("applies_when")),
+            locked=bool(d.get("locked", False)),
+            extensible_classes=bool(d.get("extensible_classes", False)),
             background_class=d.get("background_class"),
             classes=[_class(c) for c in d.get("classes", [])],
             unit=d.get("unit"),
@@ -187,6 +195,10 @@ def schema_to_dict(schema: Schema) -> dict:
             if m.applies_when.not_equals is not None:
                 aw["not_equals"] = m.applies_when.not_equals
             d["applies_when"] = aw
+        if m.locked:
+            d["locked"] = True
+        if m.extensible_classes:
+            d["extensible_classes"] = True
         if m.background_class is not None:
             d["background_class"] = m.background_class
         if m.type == "classification":
@@ -208,9 +220,26 @@ def schema_to_dict(schema: Schema) -> dict:
     }
 
 
-# Reproduces today's fixed taxonomy as a Schema — kept in sync with
+# The fixed, must-required schema — kept in sync with
 # apps/web/src/lib/schema.ts's DEFAULT_SCHEMA and the SQL seed in
-# supabase/migrations/20260714000005_measurement_schema.sql.
+# supabase/migrations/20260715000006_seaweed_schema_restructure.sql.
+_WHEN_SEAWEED_PRESENT = {"key": "seaweed_presence", "equals": "Yes"}
+
+
+def _required_regression(key: str, label: str, unit: str, max_value: float, applies_when: dict | None = None) -> dict:
+    return {
+        "key": key,
+        "label": label,
+        "type": "regression",
+        "loss_weight": 0.5,
+        "unit": unit,
+        "min": 0.0,
+        "max": max_value,
+        "applies_when": applies_when if applies_when is not None else _WHEN_SEAWEED_PRESENT,
+        "locked": True,
+    }
+
+
 DEFAULT_SCHEMA: Schema = schema_from_dict(
     {
         "species": [{"name": SPECIES["name"], "slug": SPECIES["slug"]}],
@@ -219,102 +248,153 @@ DEFAULT_SCHEMA: Schema = schema_from_dict(
         "health_healthy_min": DEFAULT_HEALTH_HEALTHY_MIN,
         "measurements": [
             {
-                "key": "condition",
-                "label": "Condition",
+                "key": "seaweed_presence",
+                "label": "Seaweed presence",
                 "type": "classification",
                 "loss_weight": 1.0,
-                "background_class": "Background",
+                "background_class": "No",
+                "locked": True,
                 "classes": [
                     {
-                        "name": "Background",
+                        "name": "Yes",
+                        "explanation": "A seaweed specimen was detected in this image.",
+                        "recommendation": "Continue with the assessment below.",
+                    },
+                    {
+                        "name": "No",
                         "explanation": "No seaweed specimen was detected in this image.",
                         "recommendation": "Point the camera at a seaweed specimen, filling the frame, and try again.",
-                    },
-                    {
-                        "name": "Healthy",
-                        "explanation": "Vivid, even coloration with intact branching and no whitening, lesions, or breakage detected.",
-                        "recommendation": "Continue routine monitoring. No action needed.",
-                    },
-                    {
-                        "name": "Disease",
-                        "explanation": "Discrete lesions or spotting consistent with a disease outbreak, distinct from generalized decay.",
-                        "recommendation": "Isolate affected line segments and confirm the pathogen before treating.",
-                    },
-                    {
-                        "name": "Decay",
-                        "explanation": "Tissue melting with dark, mushy patches and a breakdown of branch structure, consistent with decay.",
-                        "recommendation": "Remove affected fragments to prevent spread. Check water quality (temperature, salinity).",
-                    },
-                    {
-                        "name": "Dried",
-                        "explanation": "Tissue is brittle, bleached, and fully desiccated, with no living tissue remaining.",
-                        "recommendation": "Remove and dispose of dried-out material. Inspect the surrounding line for early damage.",
                     },
                 ],
             },
             {
-                "key": "disease_subtype",
-                "label": "Disease subtype",
+                "key": "health_status",
+                "label": "Health status",
+                "type": "classification",
+                "loss_weight": 1.0,
+                "applies_when": _WHEN_SEAWEED_PRESENT,
+                "locked": True,
+                "classes": [
+                    {
+                        "name": "Healthy",
+                        "explanation": "Vivid, even coloration with intact branching and no whitening, lesions, or breakage.",
+                        "recommendation": "Continue routine monitoring. No action needed.",
+                    },
+                    {
+                        "name": "Moderate",
+                        "explanation": "Some discoloration or minor structural loss, but the specimen is largely intact.",
+                        "recommendation": "Increase monitoring frequency and check water quality (temperature, salinity).",
+                    },
+                    {
+                        "name": "Low",
+                        "explanation": "Extensive discoloration, tissue loss, or structural breakdown across the specimen.",
+                        "recommendation": "Remove affected fragments to prevent spread and investigate the cause promptly.",
+                    },
+                ],
+            },
+            {
+                "key": "disease",
+                "label": "Disease",
                 "type": "classification",
                 "loss_weight": 0.5,
-                "applies_when": {"key": "condition", "equals": "Disease"},
+                "applies_when": _WHEN_SEAWEED_PRESENT,
+                "locked": True,
+                "extensible_classes": True,
                 "classes": [
+                    {"name": "NoDisease", "explanation": "No disease detected."},
                     {"name": "IceIce", "note": "Symptoms resemble ice-ice: raise water movement and reduce stress from high temperature/low salinity."},
                     {"name": "Epiphyte", "note": "Epiphyte overgrowth suspected: clean affected fronds and increase spacing/water flow."},
                     {"name": "Bacterial", "note": "Possible bacterial infection: isolate and consult a specialist before any treatment."},
                     {"name": "Bleaching", "note": "Bleaching suspected: check for temperature/light stress and relocate if possible."},
-                    {"name": "Unknown", "note": "Subtype unclear: photograph affected areas closely and consult a specialist."},
                 ],
             },
             {
-                "key": "health_score",
-                "label": "Health score",
+                "key": "disease_severity",
+                "label": "Disease severity",
                 "type": "regression",
-                "loss_weight": 1.0,
+                "loss_weight": 0.5,
                 "unit": "score",
                 "min": 0.0,
                 "max": 100.0,
-                "applies_when": {"key": "condition", "not_equals": "Background"},
+                "applies_when": {"key": "disease", "not_equals": "NoDisease"},
+                "locked": True,
             },
+            _required_regression("dried", "Dried", "%", 100.0),
+            _required_regression("decayed", "Decayed", "%", 100.0),
             {
-                "key": "dried_extent",
-                "label": "Dried extent",
-                "type": "regression",
+                "key": "colour",
+                "label": "Colour",
+                "type": "classification",
                 "loss_weight": 0.5,
-                "unit": "pct",
-                "min": 0.0,
-                "max": 100.0,
-                "applies_when": {"key": "condition", "not_equals": "Background"},
+                "applies_when": _WHEN_SEAWEED_PRESENT,
+                "locked": True,
+                "classes": [
+                    {"name": "Green"}, {"name": "Red"}, {"name": "Brown"}, {"name": "Yellow"},
+                    {"name": "Orange"}, {"name": "White"}, {"name": "Black"},
+                ],
             },
-            {
-                "key": "decayed_extent",
-                "label": "Decayed extent",
-                "type": "regression",
-                "loss_weight": 0.5,
-                "unit": "pct",
-                "min": 0.0,
-                "max": 100.0,
-                "applies_when": {"key": "condition", "not_equals": "Background"},
-            },
+            _required_regression("carrageenan_yield", "Carrageenan Yield", "%", 100.0),
+            _required_regression("gel_strength", "Gel Strength", "g/cm²", 2000.0),
+            _required_regression("viscosity", "Viscosity", "cP", 1000.0),
+            _required_regression("daily_growth_rate", "Daily Growth Rate", "%/day", 100.0),
+            _required_regression("mineral_ca", "Mineral Content — Ca", "mg/kg", 100000.0),
+            _required_regression("mineral_mg", "Mineral Content — Mg", "mg/kg", 100000.0),
+            _required_regression("mineral_k", "Mineral Content — K", "mg/kg", 100000.0),
+            _required_regression("mineral_na", "Mineral Content — Na", "mg/kg", 100000.0),
+            _required_regression("caw", "Clean Anhydrous Weed (CAW)", "%", 100.0),
+            _required_regression("impurities", "Impurities", "%", 100.0),
+            _required_regression("sulfate_content", "Sulfate Content", "%", 100.0),
+            _required_regression("acid_insoluble_ash", "Acid-Insoluble Ash", "%", 100.0),
+            _required_regression("ash_content", "Ash Content", "%", 100.0),
         ],
     }
 )
 
 
+# Preset copy for the pre-schema condition/subtype taxonomy. Kept
+# self-contained (rather than recovered from DEFAULT_SCHEMA) so that old
+# checkpoints reproduce their original explanations even now that
+# DEFAULT_SCHEMA no longer contains a "condition"/"disease_subtype" head.
+_LEGACY_CONDITION_COPY: dict[str, tuple[str, str]] = {
+    "Background": (
+        "No seaweed specimen was detected in this image.",
+        "Point the camera at a seaweed specimen, filling the frame, and try again.",
+    ),
+    "Healthy": (
+        "Vivid, even coloration with intact branching and no whitening, lesions, or breakage detected.",
+        "Continue routine monitoring. No action needed.",
+    ),
+    "Disease": (
+        "Discrete lesions or spotting consistent with a disease outbreak, distinct from generalized decay.",
+        "Isolate affected line segments and confirm the pathogen before treating.",
+    ),
+    "Decay": (
+        "Tissue melting with dark, mushy patches and a breakdown of branch structure, consistent with decay.",
+        "Remove affected fragments to prevent spread. Check water quality (temperature, salinity).",
+    ),
+    "Dried": (
+        "Tissue is brittle, bleached, and fully desiccated, with no living tissue remaining.",
+        "Remove and dispose of dried-out material. Inspect the surrounding line for early damage.",
+    ),
+}
+_LEGACY_SUBTYPE_NOTES: dict[str, str] = {
+    "IceIce": "Symptoms resemble ice-ice: raise water movement and reduce stress from high temperature/low salinity.",
+    "Epiphyte": "Epiphyte overgrowth suspected: clean affected fronds and increase spacing/water flow.",
+    "Bacterial": "Possible bacterial infection: isolate and consult a specialist before any treatment.",
+    "Bleaching": "Bleaching suspected: check for temperature/light stress and relocate if possible.",
+    "Unknown": "Subtype unclear: photograph affected areas closely and consult a specialist.",
+}
+
+
 def legacy_schema_from_checkpoint(payload: dict) -> Schema:
     """Synthesizes a Schema for a checkpoint saved before schemas existed
     (payload has condition_classes/subtype_classes/species but no schema key),
-    so old checkpoints keep loading. Preset copy is recovered from
-    DEFAULT_SCHEMA for any class name that still matches; unmatched classes
+    so old checkpoints keep loading. Preset copy comes from the self-contained
+    legacy tables above for any class name that matches; unmatched classes
     (e.g. an admin-renamed taxonomy) get no preset copy."""
     condition_classes: list[str] = payload.get("condition_classes") or list(DEFAULT_CONDITION_CLASSES)
     subtype_classes: list[str] = payload.get("subtype_classes") or list(DEFAULT_DISEASE_SUBTYPES)
     species: dict = payload.get("species") or dict(SPECIES)
-
-    default_condition = DEFAULT_SCHEMA.find("condition")
-    condition_by_name = {c.name: c for c in (default_condition.classes if default_condition else [])}
-    default_subtype = DEFAULT_SCHEMA.find("disease_subtype")
-    subtype_by_name = {c.name: c for c in (default_subtype.classes if default_subtype else [])}
 
     condition_measurement = MeasurementDef(
         key="condition",
@@ -325,8 +405,8 @@ def legacy_schema_from_checkpoint(payload: dict) -> Schema:
         classes=[
             ClassDef(
                 name=name,
-                explanation=condition_by_name[name].explanation if name in condition_by_name else None,
-                recommendation=condition_by_name[name].recommendation if name in condition_by_name else None,
+                explanation=_LEGACY_CONDITION_COPY[name][0] if name in _LEGACY_CONDITION_COPY else None,
+                recommendation=_LEGACY_CONDITION_COPY[name][1] if name in _LEGACY_CONDITION_COPY else None,
             )
             for name in condition_classes
         ],
@@ -338,7 +418,7 @@ def legacy_schema_from_checkpoint(payload: dict) -> Schema:
         loss_weight=0.5,
         applies_when=AppliesWhen(key="condition", equals="Disease") if "Disease" in condition_classes else None,
         classes=[
-            ClassDef(name=name, note=subtype_by_name[name].note if name in subtype_by_name else None)
+            ClassDef(name=name, note=_LEGACY_SUBTYPE_NOTES.get(name))
             for name in subtype_classes
         ],
     )

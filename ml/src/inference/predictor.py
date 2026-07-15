@@ -214,22 +214,49 @@ class Predictor:
                     mask_png_base64=mask_b64,
                 )
 
-        # --- Legacy flat fields, from the primary classification + the
-        # well-known measurement keys when the schema still has them. ---
-        condition_name = predicted_class.get(primary.key, "Unknown") if primary else "Unknown"
+        # --- Legacy flat fields, from the well-known measurement keys when the
+        # schema has them, falling back to the older names so pre-restructure
+        # checkpoints keep populating the same PWA shape. ---
         confidence = classification_confidence.get(primary.key, 0.0) if primary else 0.0
         primary_result = measurements.get(primary.key) if primary else None
 
-        health_result = measurements.get("health_score")
-        dried_result = measurements.get("dried_extent")
-        decayed_result = measurements.get("decayed_extent")
-        subtype_result = measurements.get("disease_subtype")
+        def first_result(*keys: str):
+            for key in keys:
+                result = measurements.get(key)
+                if result is not None:
+                    return result
+            return None
 
-        health_score_value = health_result.value if health_result and isinstance(health_result.value, (int, float)) else None
-        level = (
-            _derive_level(health_score_value, schema.health_moderate_min, schema.health_healthy_min)
-            if health_score_value is not None
-            else None
+        # Health status is now a labeled class (Healthy/Moderate/Low); older
+        # checkpoints instead regressed a health_score we bucket into a level.
+        health_status_result = measurements.get("health_status")
+        health_score_result = measurements.get("health_score")
+        health_score_value = (
+            health_score_result.value if health_score_result and isinstance(health_score_result.value, (int, float)) else None
+        )
+        if health_status_result is not None and isinstance(health_status_result.value, str):
+            level = health_status_result.value
+        elif health_score_value is not None:
+            level = _derive_level(health_score_value, schema.health_moderate_min, schema.health_healthy_min)
+        else:
+            level = None
+
+        dried_result = first_result("dried", "dried_extent")
+        decayed_result = first_result("decayed", "decayed_extent")
+        disease_result = first_result("disease", "disease_subtype")
+        disease_value = disease_result.value if disease_result and isinstance(disease_result.value, str) else None
+        # "NoDisease" is the explicit no-finding class — surface it as no subtype.
+        if disease_value == "NoDisease":
+            disease_value = None
+
+        # Prefer the subject-level classification's copy for a present specimen;
+        # the primary classifier's copy is only useful for the no-subject case.
+        copy_result = health_status_result if (not is_background and health_status_result is not None) else primary_result
+        # For the flat `condition` field, prefer the health status label.
+        condition_name = (
+            health_status_result.value
+            if (health_status_result is not None and isinstance(health_status_result.value, str))
+            else (predicted_class.get(primary.key, "Unknown") if primary else "Unknown")
         )
 
         gradcam_b64 = ""
@@ -244,11 +271,11 @@ class Predictor:
             health=level,
             health_score=health_score_value,
             confidence=confidence,
-            disease_subtype=(subtype_result.value if subtype_result and isinstance(subtype_result.value, str) else None),
+            disease_subtype=disease_value,
             dried_pct=(dried_result.value if dried_result and isinstance(dried_result.value, (int, float)) else None),
             decayed_pct=(decayed_result.value if decayed_result and isinstance(decayed_result.value, (int, float)) else None),
-            explanation=(primary_result.explanation if primary_result and primary_result.explanation else "No explanation available yet."),
-            recommendation=(primary_result.recommendation if primary_result and primary_result.recommendation else "No recommendation available yet."),
+            explanation=(copy_result.explanation if copy_result and copy_result.explanation else "No explanation available yet."),
+            recommendation=(copy_result.recommendation if copy_result and copy_result.recommendation else "No recommendation available yet."),
             gradcam_base64_png=gradcam_b64,
             measurements=measurements,
         )

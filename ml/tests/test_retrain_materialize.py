@@ -153,7 +153,7 @@ def test_fetch_active_schema_falls_back_to_default_when_no_row(mock_supabase, mo
     try:
         doc = fetch_active_schema()
         assert doc["active_species_slug"] == "Kappaphycus_alvarezii"
-        assert any(m["key"] == "condition" for m in doc["measurements"])
+        assert any(m["key"] == "seaweed_presence" for m in doc["measurements"])
     finally:
         server.shutdown()
         thread.join(timeout=5)

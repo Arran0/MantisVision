@@ -56,6 +56,18 @@ export interface MeasurementDef {
   type: MeasurementType;
   loss_weight: number;
   applies_when?: AppliesWhen | null;
+  // A "must-required" measurement that ships with the app. Locked measurements
+  // can't be removed or have their key/type reconfigured from the admin
+  // Structure editor — they're the fixed backbone every dataset collects
+  // (seaweed presence, health status, the lab-quality metrics, …). Purely a
+  // UI/authoring guard; the ML pipeline treats a locked measurement like any
+  // other.
+  locked?: boolean;
+  // For a locked classification whose class list is still meant to grow (e.g.
+  // "disease" — the admin adds a class per named disease). When false/absent
+  // on a locked measurement, its classes are fixed too (e.g. colour's palette,
+  // health status' Healthy/Moderate/Low).
+  extensible_classes?: boolean;
   // classification only
   background_class?: string | null; // name of the "no subject" class, if any
   classes?: ClassDef[];
@@ -80,58 +92,91 @@ export interface SchemaDoc {
   measurements: MeasurementDef[];
 }
 
+// "Seaweed present?" gates every subject-level measurement below: they only
+// apply when a specimen is actually in frame.
+const WHEN_SEAWEED_PRESENT: AppliesWhen = { key: "seaweed_presence", equals: "Yes" };
+
+// A locked 0–100 (or other-range) lab/quality regression that ships as part of
+// the required schema. Keeps the long block below readable.
+function requiredRegression(
+  key: string,
+  label: string,
+  unit: string,
+  max: number,
+  applies_when: AppliesWhen = WHEN_SEAWEED_PRESENT
+): MeasurementDef {
+  return { key, label, type: "regression", loss_weight: 0.5, unit, min: 0, max, applies_when, locked: true };
+}
+
 // Fallback used when no schema row exists yet. Mirrors the SQL seed.
 export const DEFAULT_SCHEMA: SchemaDoc = {
   species: [{ name: "Kappaphycus alvarezii", slug: "Kappaphycus_alvarezii" }],
   active_species_slug: "Kappaphycus_alvarezii",
+  // Retained for schema compatibility; health status is now a labeled
+  // classification (below), no longer derived from a numeric score.
   health_moderate_min: 45.0,
   health_healthy_min: 75.0,
   measurements: [
+    // The primary classifier: is there a seaweed specimen in the frame at all?
+    // "No" is the background / no-subject class the model trains against.
     {
-      key: "condition",
-      label: "Condition",
+      key: "seaweed_presence",
+      label: "Seaweed presence",
       type: "classification",
       loss_weight: 1.0,
-      background_class: "Background",
+      background_class: "No",
+      locked: true,
       classes: [
         {
-          name: "Background",
+          name: "Yes",
+          explanation: "A seaweed specimen was detected in this image.",
+          recommendation: "Continue with the assessment below.",
+        },
+        {
+          name: "No",
           explanation: "No seaweed specimen was detected in this image.",
           recommendation: "Point the camera at a seaweed specimen, filling the frame, and try again.",
         },
+      ],
+    },
+    // The overall health label — an explicit class, not a bucketed score.
+    {
+      key: "health_status",
+      label: "Health status",
+      type: "classification",
+      loss_weight: 1.0,
+      applies_when: WHEN_SEAWEED_PRESENT,
+      locked: true,
+      classes: [
         {
           name: "Healthy",
-          explanation:
-            "Vivid, even coloration with intact branching and no whitening, lesions, or breakage detected.",
+          explanation: "Vivid, even coloration with intact branching and no whitening, lesions, or breakage.",
           recommendation: "Continue routine monitoring. No action needed.",
         },
         {
-          name: "Disease",
-          explanation:
-            "Discrete lesions or spotting consistent with a disease outbreak, distinct from generalized decay.",
-          recommendation: "Isolate affected line segments and confirm the pathogen before treating.",
+          name: "Moderate",
+          explanation: "Some discoloration or minor structural loss, but the specimen is largely intact.",
+          recommendation: "Increase monitoring frequency and check water quality (temperature, salinity).",
         },
         {
-          name: "Decay",
-          explanation:
-            "Tissue melting with dark, mushy patches and a breakdown of branch structure, consistent with decay.",
-          recommendation:
-            "Remove affected fragments to prevent spread. Check water quality (temperature, salinity).",
-        },
-        {
-          name: "Dried",
-          explanation: "Tissue is brittle, bleached, and fully desiccated, with no living tissue remaining.",
-          recommendation: "Remove and dispose of dried-out material. Inspect the surrounding line for early damage.",
+          name: "Low",
+          explanation: "Extensive discoloration, tissue loss, or structural breakdown across the specimen.",
+          recommendation: "Remove affected fragments to prevent spread and investigate the cause promptly.",
         },
       ],
     },
+    // Named diseases + an explicit "no disease" class. Extensible: the admin
+    // adds one class per disease they want the model to recognise.
     {
-      key: "disease_subtype",
-      label: "Disease subtype",
+      key: "disease",
+      label: "Disease",
       type: "classification",
       loss_weight: 0.5,
-      applies_when: { key: "condition", equals: "Disease" },
+      applies_when: WHEN_SEAWEED_PRESENT,
+      locked: true,
+      extensible_classes: true,
       classes: [
+        { name: "NoDisease", explanation: "No disease detected." },
         {
           name: "IceIce",
           note: "Symptoms resemble ice-ice: raise water movement and reduce stress from high temperature/low salinity.",
@@ -139,41 +184,64 @@ export const DEFAULT_SCHEMA: SchemaDoc = {
         { name: "Epiphyte", note: "Epiphyte overgrowth suspected: clean affected fronds and increase spacing/water flow." },
         { name: "Bacterial", note: "Possible bacterial infection: isolate and consult a specialist before any treatment." },
         { name: "Bleaching", note: "Bleaching suspected: check for temperature/light stress and relocate if possible." },
-        { name: "Unknown", note: "Subtype unclear: photograph affected areas closely and consult a specialist." },
       ],
     },
+    // Disease severity applies only once a disease (other than "no disease")
+    // has been recorded.
     {
-      key: "health_score",
-      label: "Health score",
+      key: "disease_severity",
+      label: "Disease severity",
       type: "regression",
-      loss_weight: 1.0,
+      loss_weight: 0.5,
       unit: "score",
       min: 0,
       max: 100,
-      applies_when: { key: "condition", not_equals: "Background" },
+      applies_when: { key: "disease", not_equals: "NoDisease" },
+      locked: true,
     },
+    requiredRegression("dried", "Dried", "%", 100),
+    requiredRegression("decayed", "Decayed", "%", 100),
+    // Observed colour, a fixed palette (not free text).
     {
-      key: "dried_extent",
-      label: "Dried extent",
-      type: "regression",
+      key: "colour",
+      label: "Colour",
+      type: "classification",
       loss_weight: 0.5,
-      unit: "pct",
-      min: 0,
-      max: 100,
-      applies_when: { key: "condition", not_equals: "Background" },
+      applies_when: WHEN_SEAWEED_PRESENT,
+      locked: true,
+      classes: [
+        { name: "Green" },
+        { name: "Red" },
+        { name: "Brown" },
+        { name: "Yellow" },
+        { name: "Orange" },
+        { name: "White" },
+        { name: "Black" },
+      ],
     },
-    {
-      key: "decayed_extent",
-      label: "Decayed extent",
-      type: "regression",
-      loss_weight: 0.5,
-      unit: "pct",
-      min: 0,
-      max: 100,
-      applies_when: { key: "condition", not_equals: "Background" },
-    },
+    // Lab / quality-assay metrics.
+    requiredRegression("carrageenan_yield", "Carrageenan Yield", "%", 100),
+    requiredRegression("gel_strength", "Gel Strength", "g/cm²", 2000),
+    requiredRegression("viscosity", "Viscosity", "cP", 1000),
+    requiredRegression("daily_growth_rate", "Daily Growth Rate", "%/day", 100),
+    requiredRegression("mineral_ca", "Mineral Content — Ca", "mg/kg", 100000),
+    requiredRegression("mineral_mg", "Mineral Content — Mg", "mg/kg", 100000),
+    requiredRegression("mineral_k", "Mineral Content — K", "mg/kg", 100000),
+    requiredRegression("mineral_na", "Mineral Content — Na", "mg/kg", 100000),
+    requiredRegression("caw", "Clean Anhydrous Weed (CAW)", "%", 100),
+    requiredRegression("impurities", "Impurities", "%", 100),
+    requiredRegression("sulfate_content", "Sulfate Content", "%", 100),
+    requiredRegression("acid_insoluble_ash", "Acid-Insoluble Ash", "%", 100),
+    requiredRegression("ash_content", "Ash Content", "%", 100),
   ],
 };
+
+// The keys of every locked (must-required) measurement, derived from
+// DEFAULT_SCHEMA so there's a single source of truth. Used by the admin
+// editor (to lock controls) and validation (to reject removing them).
+export const REQUIRED_MEASUREMENT_KEYS: readonly string[] = DEFAULT_SCHEMA.measurements
+  .filter((m) => m.locked)
+  .map((m) => m.key);
 
 // --- Derivation helpers ----------------------------------------------------
 
@@ -346,6 +414,16 @@ export function validateSchema(doc: unknown): string | null {
 
   if (!t.measurements.some((m) => m.type === "classification" && m.background_class))
     return "At least one classification measurement must declare a background_class (a \"no subject\" class), so the model has negatives to train against.";
+
+  // Locked, must-required measurements can't be dropped or retyped (the admin
+  // editor enforces this in the UI; this guards the API against a hand-edited
+  // payload that removes them).
+  for (const req of DEFAULT_SCHEMA.measurements.filter((m) => m.locked)) {
+    const found = t.measurements.find((m) => m.key === req.key);
+    if (!found) return `Required measurement ${JSON.stringify(req.key)} (${req.label}) cannot be removed.`;
+    if (found.type !== req.type)
+      return `Required measurement ${JSON.stringify(req.key)} must stay a ${req.type}.`;
+  }
 
   return null;
 }

@@ -149,18 +149,21 @@ def test_checkpoint_round_trip_preserves_schema(tmp_path):
 
 def test_load_checkpoint_synthesizes_legacy_schema_for_pre_schema_checkpoints(tmp_path):
     """A checkpoint saved by the old save_checkpoint (condition_classes/
-    subtype_classes/species, no "schema" key) must still load."""
-    from config import DEFAULT_SCHEMA
+    subtype_classes/species, no "schema" key) must still load — even now that
+    DEFAULT_SCHEMA has moved on to a different set of heads."""
+    from config import legacy_schema_from_checkpoint
     from src.models.efficientnet import build_model as _build
 
-    legacy_schema = DEFAULT_SCHEMA
-    model = _build(legacy_schema, freeze_backbone=False, pretrained=False)
-    legacy_payload = {
-        "model_state_dict": model.state_dict(),
+    legacy_meta = {
         "condition_classes": ["Background", "Healthy", "Disease", "Decay", "Dried"],
         "subtype_classes": ["IceIce", "Epiphyte", "Bacterial", "Bleaching", "Unknown"],
         "species": {"name": "Kappaphycus alvarezii", "slug": "Kappaphycus_alvarezii"},
     }
+    # An old checkpoint's weights were saved with the old heads, i.e. those the
+    # legacy synthesizer reproduces — build the state_dict from that schema.
+    legacy_schema = legacy_schema_from_checkpoint(legacy_meta)
+    model = _build(legacy_schema, freeze_backbone=False, pretrained=False)
+    legacy_payload = {"model_state_dict": model.state_dict(), **legacy_meta}
     path = tmp_path / "legacy.pt"
     torch.save(legacy_payload, path)
 

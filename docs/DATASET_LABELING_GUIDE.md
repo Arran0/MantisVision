@@ -24,7 +24,7 @@ ml/dataset/<species_slug>/
 
 ```json
 {"filename": "0001.jpg",
- "measurements": {"condition": "Healthy", "health_score": 82.4},
+ "measurements": {"seaweed_presence": "Yes", "health_status": "Healthy", "dried": 5.0},
  "masks": {"biofouling": "0001.png"}}
 ```
 
@@ -35,8 +35,9 @@ measurement's key to a mask filename under `masks/<key>/`. **Every
 measurement is optional per image** — one missing from a row simply
 contributes nothing to that head's loss for that image. This is how "no lab
 data for this measurement yet" and conditional measurements (e.g.
-`disease_subtype` only meaningful when `condition == "Disease"`) both work,
-for free, with no special-casing.
+`health_status` only meaningful when `seaweed_presence == "Yes"`, or
+`disease_severity` only when `disease != "NoDisease"`) both work, for free,
+with no special-casing.
 
 In practice you label through the admin upload form
 (`/admin/dataset`), which renders one control per active measurement
@@ -48,40 +49,51 @@ Hand-editing the manifest directly is only for local experiments.
 ## The default measurement schema
 
 Out of the box (`DEFAULT_SCHEMA` in both `ml/config.py` and
-`apps/web/src/lib/schema.ts`) there are three measurements:
+`apps/web/src/lib/schema.ts`) the schema is a fixed, **required** backbone of
+columns. The core ones:
 
 | Measurement | Type | Values |
 |---|---|---|
-| `condition` | classification | `Background`, `Healthy`, `Disease`, `Decay`, `Dried` |
-| `disease_subtype` | classification, `applies_when condition == "Disease"` | `IceIce`, `Epiphyte`, `Bacterial`, `Bleaching`, `Unknown` |
-| `health_score` | regression, 0–100 | a continuous score |
+| `seaweed_presence` | classification (primary) | `Yes`, `No` |
+| `health_status` | classification, `applies_when seaweed_presence == "Yes"` | `Healthy`, `Moderate`, `Low` |
+| `disease` | classification, `applies_when seaweed_presence == "Yes"` | `NoDisease`, `IceIce`, `Epiphyte`, `Bacterial`, `Bleaching`, … |
+| `disease_severity` | regression 0–100, `applies_when disease != "NoDisease"` | a continuous score |
+| `dried` / `decayed` | regression 0–100 | continuous extents |
+| `colour` | classification, fixed palette | `Green`, `Red`, `Brown`, `Yellow`, `Orange`, `White`, `Black` |
 
-`condition` is the **primary classifier**: its `Background` class is the
-schema's designated "no subject" class (set once, schema-wide, in the admin
-editor's "Primary classifier" section — not a per-measurement toggle). Fill
-it with **diverse non-seaweed images**: empty underwater scenes, rocks,
-ropes, sand, other organisms, blurry/dark frames with no specimen. This is
-what teaches the model to say "no seaweed detected" instead of hallucinating
-a health assessment on an irrelevant photo.
+Plus a block of required lab/quality regressions: `carrageenan_yield` (%),
+`gel_strength` (g/cm²), `viscosity` (cP), `daily_growth_rate` (%/day),
+per-mineral content `mineral_ca`/`mineral_mg`/`mineral_k`/`mineral_na`
+(mg/kg), `caw` (%), `impurities` (%), `sulfate_content` (%),
+`acid_insoluble_ash` (%), and `ash_content` (%).
 
-Severity (Moderate vs. Low) is **not a label you assign**. It's a display-only
-bucket derived at inference purely from the regressed `health_score` against
-two admin-editable thresholds (`health_moderate_min`, `health_healthy_min` —
-"Display thresholds" in the schema editor): at or above `health_healthy_min`
-→ "Healthy", at or above `health_moderate_min` → "Moderate", otherwise
-"Low". This applies uniformly to any non-background condition — there's no
-per-condition special case, so label a genuinely healthy-looking specimen
-with a high `health_score` and it will show "Healthy" regardless of which
-`condition` class it's under.
+Every one of these is **locked** — the admin Structure editor renders it
+read-only and the schema API rejects removing or retyping it — so the dataset
+always collects the same required columns. The one exception is `disease`,
+whose class list is **extensible**: add one class per named disease you want
+the model to recognise (keep the `NoDisease` class as the negative).
 
-Adding a new measurement (a lab value like moisture or gel strength, another
-segmentation target, a named-disease classifier) is an edit in `/admin/schema`,
-not a code change — the model, losses, dataset loader, and predictor all grow
-the new head generically from the schema. It stays masked (untrained, no
-effect on other heads) until images with real values for it exist.
+`seaweed_presence` is the **primary classifier**: its `No` class (formerly
+"Background") is the schema's designated "no seaweed" class. Fill it with
+**diverse non-seaweed images**: empty underwater scenes, rocks, ropes, sand,
+other organisms, blurry/dark frames with no specimen. This is what teaches
+the model to say "no seaweed detected" instead of hallucinating a health
+assessment on an irrelevant photo.
 
-Swapping the active species is also a schema edit (the Species section);
-`active_species_slug` prefixes the dataset directory.
+`health_status` is now an **explicit label you assign** (`Healthy` /
+`Moderate` / `Low`), not a bucket derived from a numeric score. Pick the class
+that matches what the specimen actually looks like.
+
+You can still **add your own extra measurements** (another segmentation
+target, an additional lab value) in `/admin/schema` — that's an edit, not a
+code change; the model, losses, dataset loader, and predictor all grow the new
+head generically from the schema. A new measurement stays masked (untrained,
+no effect on other heads) until images with real values for it exist.
+
+Species is managed in the schema's **Species** section — add one row per
+species you collect and pick it from a dropdown when labeling. There's no
+longer an "active species" toggle; `active_species_slug` is kept only as the
+dataset-directory prefix and just tracks the first species.
 
 Split ratio: **70% train / 15% validation / 15% test**, applied by the
 retrain pipeline (`ml/scripts/split_dataset.py`'s `split_class`) with a fixed
@@ -94,30 +106,35 @@ schema measurement, per image).
 
 **Label what is actually in the image, never the image quality.** There is no
 "blurry" or "low-quality" class. A soft, poorly-lit photo of a healthy
-specimen is still `Healthy`. The model learns to tolerate quality variation
+specimen is still `health_status: Healthy`. The model learns to tolerate quality variation
 through augmentation (blur, brightness/contrast jitter, and sensor noise are
 all applied during training — see `ml/src/data/transforms.py`), not through a
 separate label. Only reject an image if you genuinely can't tell what it
 shows.
 
-## Condition definitions
+## Column definitions
 
-### Healthy
-Bright coloration, no whitening, no broken branches.
+### `seaweed_presence`
+`Yes` when a specimen fills the frame; `No` (no seaweed) for the negative
+class — no seaweed specimen in frame.
 
-### Decay
-Tissue melting, brown patches, rot.
+### `health_status`
+- **Healthy** — bright, even coloration, no whitening, no broken branches.
+- **Moderate** — some discoloration or minor structural loss, largely intact.
+- **Low** — extensive discoloration, tissue loss, or structural breakdown.
 
-### Dried
-Largely dried out/bleached, detached from the line, little living tissue.
+### `dried` / `decayed`
+0–100 extent scores. `dried`: how bleached/desiccated/detached the tissue is.
+`decayed`: how much tissue melting, brown rot, or mushy breakdown is present.
 
-### Disease
-Visible lesions / infection symptoms not explained by grazing or general
-decay. Assign a `disease_subtype`.
+### `disease` / `disease_severity`
+`disease` is the visible disease (or `NoDisease` for none) — lesions /
+infection symptoms not explained by grazing or general decay. When a disease
+is assigned, also give `disease_severity` a 0–100 score.
 
-### Background
-No seaweed specimen in frame — the primary classifier's negative class (see
-above).
+### `colour`
+The dominant observed colour from the fixed palette (green, red, brown,
+yellow, orange, white, black).
 
 ## Addressing label noise
 
@@ -127,9 +144,9 @@ threat to model quality. Defenses, in order:
 1. **Clear, unambiguous rules.** Use the definitions above the same way every
    time. When two conditions are plausible, discard or flag for a second
    annotator — don't guess.
-2. **Two-annotator agreement for ambiguous cases** (e.g. Decay vs. Dried, or
-   a borderline `health_score`). Resolve disagreements by discussion, not
-   silent averaging.
+2. **Two-annotator agreement for ambiguous cases** (e.g. a high `decayed` vs.
+   high `dried` score, or a borderline `health_status`). Resolve disagreements
+   by discussion, not silent averaging.
 3. **Augmentation** simulates real-world quality variation so the model
    doesn't overfit to pristine lab photos (already wired into training).
 4. **Label smoothing** on classification heads softens the impact of a wrong
