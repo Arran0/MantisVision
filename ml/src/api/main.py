@@ -118,19 +118,29 @@ app.add_middleware(
 @app.get("/health", response_model=HealthCheckResponse)
 def health() -> HealthCheckResponse:
     checkpoint_path = config.checkpoints_dir / "best_model.pt"
-    model_loaded = checkpoint_path.exists()
-    if model_loaded:
-        schema = get_predictor().schema
-    else:
-        # No checkpoint yet — report the active schema's own measurements so
-        # /health is still informative before first load.
-        schema = SCHEMA
+    model_loaded = False
+    error: str | None = None
+    schema = SCHEMA
+    if checkpoint_path.exists():
+        try:
+            schema = get_predictor().schema
+            model_loaded = True
+        except Exception as e:  # noqa: BLE001 - /health must report failure, never 500
+            # A checkpoint file existing doesn't guarantee it's loadable (a
+            # prior startup/reload attempt may have failed and left this on
+            # disk, or the download was truncated/corrupt) — get_predictor()
+            # retries construction each time _predictor is still None, so an
+            # unrecoverable checkpoint would otherwise throw here uncaught on
+            # every single health check.
+            logger.exception("Health check: checkpoint exists but failed to load.")
+            error = str(e)
     species_measurement = schema.find("species")
     return HealthCheckResponse(
         status="ok",
         model_loaded=model_loaded,
         species_classes=species_measurement.class_names() if species_measurement else [],
         measurements=[m.key for m in schema.measurements],
+        error=error,
     )
 
 

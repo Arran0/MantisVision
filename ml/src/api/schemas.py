@@ -41,6 +41,10 @@ class HealthCheckResponse(BaseModel):
     # loaded schema knows about instead of a single "active" one.
     species_classes: list[str]
     measurements: list[str]  # measurement keys the loaded checkpoint's schema defines
+    # Set when a checkpoint file exists on disk but failed to load (corrupt
+    # download, incompatible torch version, ...) — model_loaded is false in
+    # that case too, but this says why, instead of /health just 500ing.
+    error: str | None = None
 
 
 class ReloadRequest(BaseModel):
