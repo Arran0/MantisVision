@@ -4,13 +4,62 @@ import { useEffect, useState } from "react";
 import { DEFAULT_SCHEMA, measurementApplies, type SchemaDoc } from "@/lib/schema";
 import { AdminButton, AdminCard, AdminField, AdminInput, AdminSelect, AdminTextarea, sectionHeadingClass } from "@/components/admin/ui";
 
+// The model trains at 224x224 regardless of source resolution (ml/config.py),
+// so a phone photo's native 10-20MB / 4000px+ original buys nothing for
+// classification/regression labels — it just makes the upload slow. Anything
+// above this long edge gets downscaled and re-encoded client-side before
+// upload; anything already small is sent untouched.
+const MAX_UPLOAD_DIMENSION = 1600;
+const UPLOAD_JPEG_QUALITY = 0.85;
+// Skip re-encoding small files entirely — nothing to gain.
+const COMPRESS_THRESHOLD_BYTES = 900 * 1024;
+
+// Downscales+re-encodes an oversized photo on the client so upload time
+// tracks the compressed size, not the camera's native resolution. Falls back
+// to the original file untouched on any decode/encode failure (e.g. an
+// unsupported format) or when it's already small enough.
+async function prepareForUpload(file: File): Promise<File> {
+  if (file.size <= COMPRESS_THRESHOLD_BYTES) return file;
+
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return file;
+
+  const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  if (scale >= 1) {
+    bitmap.close();
+    return file;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    return file;
+  }
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", UPLOAD_JPEG_QUALITY));
+  if (!blob) return file;
+
+  const nameWithoutExt = file.name.replace(/\.[^./]+$/, "");
+  return new File([blob], `${nameWithoutExt}.jpg`, { type: "image/jpeg" });
+}
+
 export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   // Starts from the built-in defaults and swaps to the live, admin-edited
   // schema once it loads, so new measurements/classes (species, disease, ...)
   // appear here with no code change. Species is just another classification
   // measurement in `schema.measurements` — no special-casing needed for it.
   const [schema, setSchema] = useState<SchemaDoc>(DEFAULT_SCHEMA);
+  // `file` is what actually gets uploaded (compressed once ready); `previewUrl`
+  // is shown immediately from the raw picked file so there's no wait before
+  // the admin sees what they selected.
   const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
 
   // One value per measurement, keyed by measurement key. Classification ->
   // selected class name; regression -> raw number-input string (blank =
@@ -51,8 +100,31 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Revokes the previous preview URL whenever it's replaced, and on unmount.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const picked = event.target.files?.[0] ?? null;
+    event.target.value = ""; // allow re-selecting the same file
+    if (!picked) return;
+
+    setPreviewUrl(URL.createObjectURL(picked));
+    setFile(picked);
+    setPreparing(true);
+    try {
+      setFile(await prepareForUpload(picked));
+    } finally {
+      setPreparing(false);
+    }
+  }
+
   function resetForm() {
     setFile(null);
+    setPreviewUrl(null);
     setNotes("");
     setNumberValues({});
     setMaskFiles({});
@@ -62,6 +134,10 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     event.preventDefault();
     if (!file) {
       setError("Choose a photo first.");
+      return;
+    }
+    if (preparing) {
+      setError("Still preparing the photo — try again in a moment.");
       return;
     }
     setSubmitting(true);
@@ -114,13 +190,27 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
         <h2 className={sectionHeadingClass}>Label a new photo</h2>
 
         <AdminField label="Photo">
-          <input
-            type="file"
-            accept="image/*"
-            required
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            className="block text-sm text-zinc-700"
-          />
+          <div className="flex items-center gap-3">
+            {previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt="Selected photo preview"
+                className="h-20 w-20 flex-shrink-0 border border-zinc-200 object-cover"
+              />
+            ) : (
+              <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center border border-dashed border-zinc-300 text-[10px] text-zinc-400">
+                No photo
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <label className="inline-flex w-fit cursor-pointer items-center rounded-sm border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100">
+                {previewUrl ? "Choose a different photo" : "Choose photo"}
+                <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+              </label>
+              {preparing && <span className="text-xs text-zinc-500">Preparing image…</span>}
+            </div>
+          </div>
         </AdminField>
 
         {/* One control per schema measurement, in schema order (species,
@@ -184,7 +274,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
 
         {error && <p className="text-sm text-rose-600">{error}</p>}
 
-        <AdminButton type="submit" disabled={submitting} className="self-start">
+        <AdminButton type="submit" disabled={submitting || preparing} className="self-start">
           {submitting ? "Uploading…" : "Add to dataset"}
         </AdminButton>
       </form>
