@@ -173,6 +173,9 @@ def schema_from_dict(doc: dict) -> Schema:
         return []
 
     def _measurement(d: dict) -> MeasurementDef:
+        classes_raw = d.get("classes", [])
+        ranges_raw = d.get("ranges", [])
+        seg_classes_raw = d.get("seg_classes", [])
         return MeasurementDef(
             key=d["key"],
             label=d.get("label", d["key"]),
@@ -180,12 +183,12 @@ def schema_from_dict(doc: dict) -> Schema:
             loss_weight=float(d.get("loss_weight", 1.0)),
             applies_when=_applies_when(d.get("applies_when")),
             background_class=d.get("background_class"),
-            classes=[_class(c) for c in d.get("classes", [])],
+            classes=[_class(c) for c in (classes_raw if isinstance(classes_raw, list) else [])],
             unit=d.get("unit"),
             min=float(d.get("min", 0.0)),
             max=float(d.get("max", 100.0)),
-            ranges=[_range(r) for r in d.get("ranges", [])],
-            seg_classes=[_seg_class(c) for c in d.get("seg_classes", [])],
+            ranges=[_range(r) for r in (ranges_raw if isinstance(ranges_raw, list) else [])],
+            seg_classes=[_seg_class(c) for c in (seg_classes_raw if isinstance(seg_classes_raw, list) else [])],
         )
 
     return Schema(
