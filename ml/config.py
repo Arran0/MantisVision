@@ -168,7 +168,9 @@ def schema_from_dict(doc: dict) -> Schema:
             return []
         if isinstance(raw, list):
             return [_one_applies_when(c) for c in raw]
-        return [_one_applies_when(raw)]
+        if isinstance(raw, dict):
+            return [_one_applies_when(raw)]
+        return []
 
     def _measurement(d: dict) -> MeasurementDef:
         return MeasurementDef(
