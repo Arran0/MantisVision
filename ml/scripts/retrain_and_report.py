@@ -55,7 +55,12 @@ def _supabase_env() -> tuple[str, str]:
 
 def _supabase_request(method: str, path: str, *, body: dict | None = None, params: str = "") -> object:
     url, key = _supabase_env()
-    data = json.dumps(body).encode() if body is not None else None
+    # allow_nan=False turns a stray NaN/Infinity in the body (e.g. an
+    # undefined metric that slipped past its own sanitization) into an
+    # immediate, readable ValueError here, rather than json.dumps silently
+    # emitting the bare (invalid-JSON) token NaN/Infinity that PostgREST
+    # then rejects downstream as an opaque "HTTP Error 400: Bad Request".
+    data = json.dumps(body, allow_nan=False).encode() if body is not None else None
     request = urllib.request.Request(
         f"{url}/rest/v1/{path}{params}",
         data=data,
