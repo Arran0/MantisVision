@@ -26,7 +26,7 @@ export default function AdminLoginPage() {
       return;
     }
 
-    router.push("/admin/dataset");
+    router.push("/admin/home");
     router.refresh();
   }
 

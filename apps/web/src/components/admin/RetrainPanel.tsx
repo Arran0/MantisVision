@@ -102,7 +102,7 @@ export function RetrainPanel() {
                 </div>
                 {run.datasetImageCount !== null && <p className="text-sm text-zinc-600">{run.datasetImageCount} images used</p>}
                 {run.metrics && (
-                  <pre className="max-h-48 overflow-auto rounded-lg bg-zinc-50 p-3 text-xs text-zinc-700">
+                  <pre className="max-h-48 overflow-auto rounded-sm bg-zinc-50 p-3 text-xs text-zinc-700">
                     {JSON.stringify(run.metrics, null, 2)}
                   </pre>
                 )}
