@@ -28,6 +28,14 @@ export interface TrainingImage {
   thumbnailUrl: string | null;
 }
 
+export interface TeamMember {
+  id: string;
+  email: string | null;
+  role: "admin" | "contributor" | "viewer";
+  createdAt: string;
+  isSelf: boolean;
+}
+
 export interface ModelRun {
   id: string;
   createdAt: string;

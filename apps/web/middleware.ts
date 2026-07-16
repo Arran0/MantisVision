@@ -12,7 +12,12 @@ export async function middleware(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   const isAdminApi = path.startsWith("/api/admin");
-  const isAdminPage = path.startsWith("/admin") && path !== "/admin/login";
+  // /admin/login and /admin/set-password must render for signed-out visitors:
+  // login is the entry point, and set-password finishes an invite whose token
+  // arrives in the URL hash (never sent to the server) before any session
+  // cookie exists — gating it here would bounce the invitee to login first.
+  const isAdminPage =
+    path.startsWith("/admin") && path !== "/admin/login" && path !== "/admin/set-password";
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

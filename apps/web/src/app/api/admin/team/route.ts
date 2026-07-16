@@ -1,0 +1,155 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/supabase/require-admin";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ASSIGNABLE_ROLES, type Role } from "@/lib/roles";
+import type { TeamMember } from "@/lib/types";
+
+// Where an invited teammate lands to set their password. Prefer an explicit
+// site URL (correct behind proxies / on Vercel); fall back to the request's
+// own origin for local dev.
+function setPasswordUrl(request: NextRequest): string {
+  const base = (process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin).replace(/\/$/, "");
+  return `${base}/admin/set-password`;
+}
+
+// Supabase reports an already-provisioned address a few different ways
+// depending on version; match loosely so re-invites fall back to a recovery
+// link instead of erroring.
+function isAlreadyRegistered(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes("already been registered") || m.includes("already registered") || m.includes("already exists");
+}
+
+export async function GET() {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id, email, role, created_at")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 502 });
+  }
+
+  const members: TeamMember[] = (data ?? []).map((row) => ({
+    id: row.id,
+    email: row.email,
+    role: (row.role ?? "viewer") as Role,
+    createdAt: row.created_at,
+    isSelf: row.id === auth.context.userId,
+  }));
+
+  return NextResponse.json({ members });
+}
+
+export async function POST(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
+  const body = await request.json().catch(() => null);
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const role = body?.role as Role | undefined;
+
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
+  }
+  if (!role || !ASSIGNABLE_ROLES.includes(role as (typeof ASSIGNABLE_ROLES)[number])) {
+    return NextResponse.json({ error: "Choose a valid account level." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const redirectTo = setPasswordUrl(request);
+
+  // Best effort: send the branded Supabase invite email. This only works if
+  // the project has SMTP configured — when it doesn't, this errors and we fall
+  // through to the link-only path below. Either way the admin gets a copyable
+  // link, so an invite always works even with email turned off.
+  let emailed = false;
+  let existingUser = false;
+  const invited = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
+  if (!invited.error && invited.data?.user) {
+    emailed = true;
+  } else if (invited.error && isAlreadyRegistered(invited.error.message)) {
+    existingUser = true;
+  }
+
+  // Always mint a shareable action link. For a brand-new invite we use an
+  // 'invite' link (which also creates the user if the email above didn't);
+  // for an address already in the system we use a 'recovery' link, which lets
+  // an existing/half-set-up account (re)set its password. Both land on
+  // /admin/set-password.
+  let { data, error } = await admin.auth.admin.generateLink({
+    type: emailed || existingUser ? "recovery" : "invite",
+    email,
+    options: { redirectTo },
+  });
+
+  // If we guessed 'invite' but the user turned out to already exist, retry as
+  // recovery so the admin still gets a usable link.
+  if (error && isAlreadyRegistered(error.message)) {
+    existingUser = true;
+    ({ data, error } = await admin.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo },
+    }));
+  }
+
+  if (error || !data?.user) {
+    return NextResponse.json(
+      { error: `Could not create the invite: ${error?.message ?? "unknown error"}` },
+      { status: 502 }
+    );
+  }
+
+  // Apply the chosen level. The auth trigger seeds the profile as 'viewer';
+  // this promotes it to what the admin picked. Email is backfilled too in case
+  // the row predates email capture.
+  const { error: roleError } = await admin
+    .from("profiles")
+    .update({ role, email })
+    .eq("id", data.user.id);
+
+  if (roleError) {
+    return NextResponse.json({ error: `Invite created but role update failed: ${roleError.message}` }, { status: 502 });
+  }
+
+  return NextResponse.json({
+    email,
+    role,
+    emailed,
+    reused: existingUser,
+    actionLink: data.properties?.action_link ?? null,
+  });
+}
+
+export async function PATCH(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
+  const body = await request.json().catch(() => null);
+  const userId = typeof body?.userId === "string" ? body.userId : "";
+  const role = body?.role as Role | undefined;
+
+  if (!userId) {
+    return NextResponse.json({ error: "Missing user." }, { status: 400 });
+  }
+  if (!role || !["admin", "contributor", "viewer"].includes(role)) {
+    return NextResponse.json({ error: "Invalid account level." }, { status: 400 });
+  }
+  // Guard against an admin locking themselves out of admin controls.
+  if (userId === auth.context.userId && role !== "admin") {
+    return NextResponse.json({ error: "You can't change your own admin level." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("profiles").update({ role }).eq("id", userId);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 502 });
+  }
+
+  return NextResponse.json({ userId, role });
+}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/supabase/require-admin";
+import { requireContributor } from "@/lib/supabase/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActiveSchema } from "@/lib/serverSchema";
 import {
@@ -13,7 +13,7 @@ import type { TrainingImage } from "@/lib/types";
 
 const IMAGES_BUCKET = "training-images";
 const MASKS_BUCKET = "training-masks";
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 15;
 const SIGNED_URL_TTL_S = 60 * 5;
 
 function extensionFor(file: File): string {
@@ -56,7 +56,7 @@ function validateMeasurements(
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAdmin();
+  const auth = await requireContributor();
   if (!auth.ok) return auth.response;
 
   const formData = await request.formData();
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAdmin();
+  const auth = await requireContributor();
   if (!auth.ok) return auth.response;
 
   const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") ?? "1") || 1);
@@ -174,9 +174,15 @@ export async function GET(request: NextRequest) {
   const to = from + PAGE_SIZE - 1;
 
   const admin = createAdminClient();
-  const { data: rows, error } = await admin
+  const {
+    data: rows,
+    error,
+    count,
+  } = await admin
     .from("training_images")
-    .select("id, created_at, created_by, species, colour, measurements, notes, status, storage_path")
+    .select("id, created_at, created_by, species, colour, measurements, notes, status, storage_path", {
+      count: "exact",
+    })
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -203,5 +209,8 @@ export async function GET(request: NextRequest) {
     })
   );
 
-  return NextResponse.json({ images, page });
+  const total = count ?? 0;
+  const hasMore = page * PAGE_SIZE < total;
+
+  return NextResponse.json({ images, page, pageSize: PAGE_SIZE, total, hasMore });
 }

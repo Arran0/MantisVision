@@ -295,7 +295,7 @@ export function MeasurementSchemaEditor() {
                   </p>
 
                   {/* applies_when — a repeatable list of AND-combined conditions -- */}
-                  <div className="flex flex-col gap-2 rounded-lg bg-zinc-50 p-3">
+                  <div className="flex flex-col gap-2 rounded-sm bg-zinc-50 p-3">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-ocean-600">
                       Only applies when {appliesWhen.length > 1 ? "(all must hold)" : ""}
                     </span>
@@ -391,7 +391,7 @@ export function MeasurementSchemaEditor() {
                     <motion.div key={m.type} {...fade} className="flex flex-col gap-3">
                       {m.type === "classification" &&
                         (m.classes ?? []).map((c, ci) => (
-                          <div key={ci} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
+                          <div key={ci} className="flex flex-col gap-2 rounded-sm border border-zinc-200 p-3">
                             <div className="flex items-end gap-3">
                               <AdminField label="Class name" className="flex-1 min-w-[8rem]">
                                 <AdminInput value={c.name} onChange={(e) => patchClass(i, ci, { name: e.target.value })} />
@@ -457,7 +457,7 @@ export function MeasurementSchemaEditor() {
                             </AdminField>
                           </div>
 
-                          <div className="flex flex-col gap-2 rounded-lg bg-zinc-50 p-3">
+                          <div className="flex flex-col gap-2 rounded-sm bg-zinc-50 p-3">
                             <span className="text-[10px] font-bold uppercase tracking-widest text-ocean-600">
                               Explanation / recommendation by range (optional)
                             </span>
@@ -466,7 +466,7 @@ export function MeasurementSchemaEditor() {
                               31–60 vs. 61–100. A value outside every range below just gets no preset copy.
                             </p>
                             {(m.ranges ?? []).map((r, ri) => (
-                              <div key={ri} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
+                              <div key={ri} className="flex flex-col gap-2 rounded-sm border border-zinc-200 p-3">
                                 <div className="flex items-end gap-3">
                                   <AdminField label="From" className="w-24">
                                     <AdminInput
@@ -524,7 +524,7 @@ export function MeasurementSchemaEditor() {
                               <AdminField label="Color" className="w-20">
                                 <input
                                   type="color"
-                                  className="h-[2.375rem] w-full rounded-lg border border-zinc-300"
+                                  className="h-[2.375rem] w-full rounded-sm border border-zinc-300"
                                   value={c.color}
                                   onChange={(e) => patchSegClass(i, si, { color: e.target.value })}
                                 />
