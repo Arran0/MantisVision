@@ -51,13 +51,13 @@ export function AdminTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>
 }
 
 export function AdminCard({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-none border border-zinc-200 bg-white shadow-sm ${className}`}>{children}</div>;
+  return <div className={`rounded-none border border-zinc-200 bg-zinc-50 shadow-sm ${className}`}>{children}</div>;
 }
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-zinc-900 text-white hover:bg-zinc-800",
+  primary: "bg-dewberry-700 text-dewberry-50 hover:bg-dewberry-800",
   secondary: "border border-zinc-300 text-zinc-900 hover:bg-zinc-100",
   danger: "border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100",
   ghost: "text-dewberry-700 hover:bg-dewberry-50",
@@ -108,7 +108,7 @@ export function AdminStat({
   hint?: ReactNode;
 }) {
   return (
-    <div className="rounded-none border border-zinc-200 bg-white p-5">
+    <div className="rounded-none border border-zinc-200 bg-zinc-50 p-5">
       <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{label}</p>
       <p className="mt-2 text-3xl font-bold tabular-nums tracking-tight text-zinc-900">{value}</p>
       {hint && <p className="mt-1 text-xs text-zinc-500">{hint}</p>}

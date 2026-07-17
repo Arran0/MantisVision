@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
-import Link from "next/link";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { Background } from "@/components/Background";
 import { Logo } from "@/components/Logo";
+import { TopBarAuthButton } from "@/components/TopBarAuthButton";
+import { createClient } from "@/lib/supabase/server";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -35,7 +36,14 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Supabase may not be configured yet (e.g. env vars unset) — the public
+  // site must still render in that case, just always showing "Sign in".
+  const isSupabaseConfigured = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+  const user = isSupabaseConfigured ? (await createClient().auth.getUser()).data.user : null;
+
   return (
     <html lang="en" className={poppins.variable}>
       <body className="min-h-screen font-sans text-slate-900 antialiased">
@@ -52,12 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="hidden text-sm text-slate-400 sm:ml-auto sm:block">
               Google Lens for Seaweed
             </span>
-            <Link
-              href="/admin/login"
-              className="ml-auto shrink-0 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition duration-200 hover:bg-slate-800 active:scale-95 sm:ml-3 sm:px-5 sm:py-2.5 sm:text-sm"
-            >
-              Sign in
-            </Link>
+            <TopBarAuthButton signedIn={Boolean(user)} />
           </div>
         </header>
 
