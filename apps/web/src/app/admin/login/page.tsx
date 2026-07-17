@@ -59,6 +59,7 @@ export default function AdminLoginPage() {
               {loading ? "Signing in…" : "Sign in"}
             </AdminButton>
           </form>
+          <p className="mt-5 text-center text-xs text-zinc-400">This sign-in is for admin use only.</p>
         </AdminCard>
       </main>
     </div>

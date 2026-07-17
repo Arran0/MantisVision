@@ -16,7 +16,7 @@ export const inputClass =
 export const labelClass = "mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-zinc-500";
 
 export const sectionHeadingClass =
-  "mb-3 mt-1 border-b border-zinc-200 pb-1 text-[10px] font-bold uppercase tracking-widest text-ocean-600";
+  "mb-3 mt-1 border-b border-zinc-200 pb-1 text-[10px] font-bold uppercase tracking-widest text-dewberry-600";
 
 export function AdminField({
   label,
@@ -60,7 +60,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-zinc-900 text-white hover:bg-zinc-800",
   secondary: "border border-zinc-300 text-zinc-900 hover:bg-zinc-100",
   danger: "border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100",
-  ghost: "text-ocean-700 hover:bg-ocean-50",
+  ghost: "text-dewberry-700 hover:bg-dewberry-50",
 };
 
 export function AdminButton({
@@ -76,11 +76,11 @@ export function AdminButton({
   );
 }
 
-type BadgeTone = "zinc" | "ocean" | "seaweed" | "amber" | "rose";
+type BadgeTone = "zinc" | "dewberry" | "seaweed" | "amber" | "rose";
 
 const BADGE_TONES: Record<BadgeTone, string> = {
   zinc: "bg-zinc-100 text-zinc-700 border-zinc-200",
-  ocean: "bg-ocean-50 text-ocean-700 border-ocean-100",
+  dewberry: "bg-dewberry-50 text-dewberry-700 border-dewberry-200",
   seaweed: "bg-seaweed-50 text-seaweed-700 border-seaweed-200",
   amber: "bg-amber-50 text-amber-700 border-amber-200",
   rose: "bg-rose-50 text-rose-700 border-rose-200",
@@ -130,9 +130,9 @@ export function AdminPageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-none bg-zinc-900 px-5 py-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-none bg-dewberry-900 px-5 py-4">
       <div className="flex items-center gap-3">
-        {icon && <div className="flex h-9 w-9 items-center justify-center rounded-sm bg-white/10 text-ocean-400">{icon}</div>}
+        {icon && <div className="flex h-9 w-9 items-center justify-center rounded-sm bg-white/10 text-dewberry-300">{icon}</div>}
         <div>
           <h1 className="text-base font-bold text-white">{title}</h1>
           {subtitle && <p className="text-xs text-zinc-400">{subtitle}</p>}

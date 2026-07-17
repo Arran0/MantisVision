@@ -38,7 +38,7 @@ export function AdminNav({ email, role }: { email: string | null; role: Role }) 
               key={link.href}
               href={link.href}
               className={`rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${
-                active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                active ? "bg-dewberry-600 text-white" : "text-zinc-600 hover:bg-zinc-100"
               }`}
             >
               {link.label}
@@ -58,7 +58,7 @@ export function AdminNav({ email, role }: { email: string | null; role: Role }) 
         <button
           type="button"
           onClick={signOut}
-          className="rounded-sm border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100"
+          className="rounded-full bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-zinc-800"
         >
           Sign out
         </button>

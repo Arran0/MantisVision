@@ -296,7 +296,7 @@ export function MeasurementSchemaEditor() {
 
                   {/* applies_when — a repeatable list of AND-combined conditions -- */}
                   <div className="flex flex-col gap-2 rounded-sm bg-zinc-50 p-3">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-ocean-600">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-dewberry-600">
                       Only applies when {appliesWhen.length > 1 ? "(all must hold)" : ""}
                     </span>
                     {appliesWhen.map((cond, ci) => {
@@ -458,7 +458,7 @@ export function MeasurementSchemaEditor() {
                           </div>
 
                           <div className="flex flex-col gap-2 rounded-sm bg-zinc-50 p-3">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-ocean-600">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-dewberry-600">
                               Explanation / recommendation by range (optional)
                             </span>
                             <p className="-mt-1 text-xs text-zinc-500">

@@ -49,11 +49,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="text-2xl font-bold tracking-tight sm:text-3xl">
               <span className="mv-text-gradient">Mantis Vision</span>
             </span>
-            <span className="ml-auto hidden text-sm text-slate-400 sm:block">
+            <span className="hidden text-sm text-slate-400 sm:ml-auto sm:block">
               Google Lens for Seaweed
             </span>
-            <Link href="/admin/login" className="mv-btn-blue mv-btn-sm sm:ml-4">
-              Admin login
+            <Link
+              href="/admin/login"
+              className="ml-auto shrink-0 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition duration-200 hover:bg-slate-800 active:scale-95 sm:ml-3 sm:px-5 sm:py-2.5 sm:text-sm"
+            >
+              Sign in
             </Link>
           </div>
         </header>

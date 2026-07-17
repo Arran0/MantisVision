@@ -22,7 +22,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (!isDashboardRole(user.role)) {
     return (
-      <div className="min-h-screen bg-zinc-50">
+      <div className="min-h-screen bg-zinc-100">
         <main className="mx-auto flex max-w-lg flex-col items-center gap-3 px-5 py-24 text-center">
           <h1 className="text-xl font-bold text-zinc-900">Not authorized</h1>
           <p className="text-sm text-zinc-600">
@@ -35,8 +35,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <main className="mx-auto flex max-w-5xl flex-col gap-5 px-5 py-8 sm:px-8">
+    <div className="min-h-screen bg-zinc-100">
+      <main className="mx-auto flex w-[95%] max-w-none flex-col gap-5 py-8">
         <AdminNav email={user.email} role={user.role} />
         {children}
       </main>

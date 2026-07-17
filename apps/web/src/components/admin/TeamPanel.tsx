@@ -15,8 +15,8 @@ import type { TeamMember } from "@/lib/types";
 
 type InviteResult = { email: string; role: Role; emailed: boolean; reused: boolean; actionLink: string | null };
 
-function roleTone(role: Role): "ocean" | "seaweed" | "zinc" {
-  if (role === "admin") return "ocean";
+function roleTone(role: Role): "dewberry" | "seaweed" | "zinc" {
+  if (role === "admin") return "dewberry";
   if (role === "contributor") return "seaweed";
   return "zinc";
 }

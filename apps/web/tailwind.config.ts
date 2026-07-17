@@ -28,6 +28,21 @@ const config: Config = {
           700: "#166534",
           900: "#14532d",
         },
+        // Admin-side accent, drawn from Sherwin-Williams "Dewberry" (SW 6552,
+        // #3e385a, anchored at 700) — used alongside the offwhite/zinc-grey
+        // admin palette.
+        dewberry: {
+          50: "#f4eef9",
+          100: "#e8dcf1",
+          200: "#d1bce3",
+          300: "#b092cf",
+          400: "#8c6bb0",
+          500: "#6b4f8c",
+          600: "#4f3c68",
+          700: "#3e385a",
+          800: "#2a2740",
+          900: "#1a1826",
+        },
       },
       fontFamily: {
         sans: [
