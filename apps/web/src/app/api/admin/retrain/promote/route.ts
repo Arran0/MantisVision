@@ -4,10 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ML_API_URL } from "@/lib/config";
 
 // The ML API's own checkpoint download timeout is 60s (CHECKPOINT_DOWNLOAD_TIMEOUT_S
-// in ml/src/api/main.py), plus time to build the Predictor — well past Vercel's
-// default function timeout, which would otherwise kill this route and return a
-// non-JSON timeout page before the reload finishes.
-export const maxDuration = 60;
+// in ml/src/api/main.py), plus time to build the Predictor, plus a possible cold
+// wake-up if the Space has gone to sleep — well past Vercel's default function
+// timeout, which would otherwise kill this route and return a non-JSON timeout
+// page before the reload finishes. 300s is the Pro-plan ceiling without Fluid
+// Compute.
+export const maxDuration = 300;
 
 // Promotion hot-swaps the live model with zero manual steps. The mechanics are
 // automatic, but the *decision* stays a deliberate admin action (an admin
