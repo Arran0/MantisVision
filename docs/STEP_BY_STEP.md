@@ -393,6 +393,12 @@ TensorFlow Lite or CoreML for native mobile builds later.
 - **Web app (`apps/web`)** → Vercel. `vercel --cwd apps/web` or connect the
   repo in the Vercel dashboard with the root directory set to `apps/web`.
   Set `ML_API_URL` and the Supabase env vars as Vercel project env vars.
+  Also set `NEXT_PUBLIC_SITE_URL` (e.g. `https://mantis-vision.vercel.app`)
+  — without it, admin team invite links fall back to the request origin and
+  can end up pointing at `localhost:3000` if an invite is sent from a local
+  dev server. This must also be added to Supabase's Authentication → URL
+  Configuration → Redirect URLs (and set as the Site URL there), or Supabase
+  will ignore the app's `redirectTo` and use its own default instead.
 - **ML inference API (`ml`)** → Vercel's Node/edge runtime is not a fit for a
   PyTorch service. Deploy `ml/src/api` as its own service instead — a small
   container on Fly.io/Render/Railway, or a GPU-less CPU box is fine for
