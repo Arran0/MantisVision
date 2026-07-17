@@ -15,8 +15,8 @@ import type { TeamMember } from "@/lib/types";
 
 type InviteResult = { email: string; role: Role; emailed: boolean; reused: boolean; actionLink: string | null };
 
-function roleTone(role: Role): "ocean" | "seaweed" | "zinc" {
-  if (role === "admin") return "ocean";
+function roleTone(role: Role): "dewberry" | "seaweed" | "zinc" {
+  if (role === "admin") return "dewberry";
   if (role === "contributor") return "seaweed";
   return "zinc";
 }
@@ -158,7 +158,7 @@ export function TeamPanel() {
       </AdminCard>
 
       <AdminCard className="overflow-hidden">
-        <div className="flex bg-zinc-900 px-4 py-2.5">
+        <div className="flex bg-dewberry-900 px-4 py-2.5">
           <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Member</span>
           <span className="w-40 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Level</span>
           <span className="hidden w-28 flex-shrink-0 text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">

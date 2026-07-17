@@ -125,9 +125,9 @@ export function RetrainPanel() {
 }
 
 function StatusBadge({ status }: { status: ModelRun["status"] }) {
-  const tones: Record<ModelRun["status"], "zinc" | "ocean" | "seaweed" | "rose"> = {
+  const tones: Record<ModelRun["status"], "zinc" | "dewberry" | "seaweed" | "rose"> = {
     queued: "zinc",
-    running: "ocean",
+    running: "dewberry",
     completed: "seaweed",
     failed: "rose",
   };

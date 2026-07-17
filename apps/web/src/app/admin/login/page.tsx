@@ -33,7 +33,7 @@ export default function AdminLoginPage() {
   return (
     <div className="min-h-screen bg-zinc-50">
       <main className="mx-auto flex max-w-sm flex-col gap-6 px-5 py-16 sm:px-8">
-        <h1 className="text-xl font-bold tracking-tight text-zinc-900">Admin sign in</h1>
+        <h1 className="text-xl font-bold tracking-tight text-zinc-900">Admin / Contributor sign in</h1>
         <AdminCard className="p-6">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <AdminField label="Email">
@@ -59,6 +59,7 @@ export default function AdminLoginPage() {
               {loading ? "Signing in…" : "Sign in"}
             </AdminButton>
           </form>
+          <p className="mt-5 text-center text-xs text-zinc-400">For admin and contributor accounts only.</p>
         </AdminCard>
       </main>
     </div>

@@ -23,7 +23,7 @@ function ImagePreview({ image, onClose }: { image: TrainingImage; onClose: () =>
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/70 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-dewberry-900/70 p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -93,7 +93,7 @@ export function DatasetTable({
   return (
     <div className="flex flex-col gap-3">
       <AdminCard className="overflow-hidden">
-        <div className="flex bg-zinc-900 px-4 py-2.5">
+        <div className="flex bg-dewberry-900 px-4 py-2.5">
           <span className="w-16 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Photo</span>
           <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Species</span>
           <span className="hidden flex-[2] text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
