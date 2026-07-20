@@ -135,7 +135,7 @@ export function TeamPanel() {
                 ? `${invite.email} is already in the system — here's a fresh link so they can reset their password.`
                 : `Invited ${invite.email} as ${roleLabel(invite.role)}.`}{" "}
               {invite.emailed
-                ? "We emailed them an invite. You can also copy this link and send it directly — it lets them set a password and sign in."
+                ? "We emailed them an invite — it lets them set a password and sign in."
                 : "Copy this link and send it to them — it lets them set a password and sign in."}
             </p>
             {invite.actionLink ? (
@@ -150,9 +150,9 @@ export function TeamPanel() {
                   {copied ? "Copied" : "Copy link"}
                 </AdminButton>
               </div>
-            ) : (
+            ) : !invite.emailed ? (
               <p className="text-xs text-zinc-500">No link was returned — check the Supabase auth configuration.</p>
-            )}
+            ) : null}
           </div>
         )}
       </AdminCard>
