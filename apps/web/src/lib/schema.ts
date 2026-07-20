@@ -401,6 +401,8 @@ export function validateSchema(doc: unknown): string | null {
     } else if (m.type === "regression") {
       if (typeof m.min !== "number" || typeof m.max !== "number" || !(m.min < m.max))
         return `Measurement ${m.key}: min and max must be numbers with min < max.`;
+      if (m.ranges !== undefined && !Array.isArray(m.ranges))
+        return `Measurement ${m.key}: ranges must be a list.`;
       if (m.ranges && m.ranges.length > 0) {
         const sorted = [...m.ranges].sort((a, b) => a.min - b.min);
         for (const r of sorted) {
@@ -430,6 +432,8 @@ export function validateSchema(doc: unknown): string | null {
       }
     }
 
+    if (m.applies_when != null && !Array.isArray(m.applies_when))
+      return `Measurement ${m.key}: applies_when must be a list.`;
     if (m.applies_when && m.applies_when.length > 0) {
       const seenKeys = new Set<string>();
       for (const { key, equals, not_equals } of m.applies_when) {
