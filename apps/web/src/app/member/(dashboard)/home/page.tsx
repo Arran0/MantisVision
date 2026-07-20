@@ -10,7 +10,7 @@ import { roleLabel } from "@/lib/roles";
 // land here; admins get an extra team-composition row.
 export default async function HomePage() {
   const user = await getDashboardUser();
-  if (!user) redirect("/admin/login");
+  if (!user) redirect("/member/login");
 
   const admin = createAdminClient();
 

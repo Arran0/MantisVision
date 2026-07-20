@@ -6,7 +6,7 @@ export type Role = "admin" | "contributor" | "viewer";
 // Levels an admin can grant to an invited teammate.
 export const ASSIGNABLE_ROLES: Extract<Role, "admin" | "contributor">[] = ["admin", "contributor"];
 
-// Roles allowed into the /admin dashboard at all.
+// Roles allowed into the /member dashboard at all.
 export function isDashboardRole(role: string | null | undefined): role is "admin" | "contributor" {
   return role === "admin" || role === "contributor";
 }

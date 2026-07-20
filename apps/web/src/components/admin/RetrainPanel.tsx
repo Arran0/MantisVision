@@ -15,7 +15,7 @@ export function RetrainPanel() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
-    const response = await fetch("/api/admin/retrain");
+    const response = await fetch("/api/member/retrain");
     const payload = await response.json().catch(() => null);
     setRuns(payload?.runs ?? []);
   }, []);
@@ -45,7 +45,7 @@ export function RetrainPanel() {
     setTriggering(true);
     setMessage(null);
     try {
-      const response = await fetch("/api/admin/retrain", { method: "POST" });
+      const response = await fetch("/api/member/retrain", { method: "POST" });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error ?? "Failed to trigger retraining.");
       await refresh();
@@ -60,7 +60,7 @@ export function RetrainPanel() {
     setPromotingId(runId);
     setMessage(null);
     try {
-      const response = await fetch("/api/admin/retrain/promote", {
+      const response = await fetch("/api/member/retrain/promote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ modelRunId: runId }),

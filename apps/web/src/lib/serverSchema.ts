@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_SCHEMA, normalizeSchemaDoc, type SchemaDoc } from "@/lib/schema";
 
-// Import this only from /api/admin/* route handlers (it uses the service-role
+// Import this only from /api/member/* route handlers (it uses the service-role
 // client). Never import it from a Client Component.
 
 // Fetches the active (most recent) measurement_schema document via a

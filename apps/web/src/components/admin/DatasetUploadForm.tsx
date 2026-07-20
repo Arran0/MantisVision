@@ -90,7 +90,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const response = await fetch("/api/admin/schema");
+      const response = await fetch("/api/member/schema");
       const payload = await response.json().catch(() => null);
       if (!cancelled && response.ok && payload?.schema) applyDefaults(payload.schema as SchemaDoc);
     })();
@@ -170,7 +170,7 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     formData.append("notes", notes);
 
     try {
-      const response = await fetch("/api/admin/dataset", { method: "POST", body: formData });
+      const response = await fetch("/api/member/dataset", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(payload?.error ?? `Upload failed (HTTP ${response.status}).`);

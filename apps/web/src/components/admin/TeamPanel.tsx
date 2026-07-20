@@ -35,7 +35,7 @@ export function TeamPanel() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/team");
+      const response = await fetch("/api/member/team");
       const payload = await response.json().catch(() => null);
       setMembers(payload?.members ?? []);
     } finally {
@@ -54,7 +54,7 @@ export function TeamPanel() {
     setInvite(null);
     setCopied(false);
     try {
-      const response = await fetch("/api/admin/team", {
+      const response = await fetch("/api/member/team", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, role }),
@@ -73,7 +73,7 @@ export function TeamPanel() {
 
   async function changeRole(userId: string, nextRole: Role) {
     setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, role: nextRole } : m)));
-    const response = await fetch("/api/admin/team", {
+    const response = await fetch("/api/member/team", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, role: nextRole }),

@@ -1,7 +1,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 // Service-role Supabase client: bypasses RLS entirely. Import this only from
-// /api/admin/* route handlers, after requireAdmin() has already verified the
+// /api/member/* route handlers, after requireAdmin() has already verified the
 // caller — never from a Server/Client Component or anything that ships to
 // the browser.
 export function createAdminClient() {

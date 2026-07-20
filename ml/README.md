@@ -14,7 +14,7 @@ Schema-driven multi-head seaweed analyzer. A shared EfficientNet-B0 backbone
 grows one head per measurement defined in the active **measurement schema** —
 classification (e.g. condition, disease subtype), regression (e.g. health
 score, dried/decayed extent), or segmentation (e.g. biofouling coverage).
-Adding a measurement is an admin-UI edit (`/admin/schema`), not a code
+Adding a measurement is an admin-UI edit (`/member/schema`), not a code
 change. See [`../docs/STEP_BY_STEP.md`](../docs/STEP_BY_STEP.md) for the full
 walkthrough; this file is the quick reference once you already know the
 pipeline.
@@ -94,6 +94,6 @@ python scripts/export_model.py
 ```
 
 The measurement schema (measurements — including species — classes, display
-thresholds) is admin-editable at `/admin/schema` and versioned in Supabase — see
+thresholds) is admin-editable at `/member/schema` and versioned in Supabase — see
 [`../docs/DATASET_LABELING_GUIDE.md`](../docs/DATASET_LABELING_GUIDE.md) for
 how per-image annotations are structured and labeled.

@@ -28,7 +28,7 @@ export async function getDashboardUser(): Promise<DashboardUser | null> {
 // rather than shown a page they can't use.
 export async function requireAdminPage(): Promise<DashboardUser> {
   const user = await getDashboardUser();
-  if (!user) redirect("/admin/login");
-  if (user.role !== "admin") redirect("/admin/home");
+  if (!user) redirect("/member/login");
+  if (user.role !== "admin") redirect("/member/home");
   return user;
 }

@@ -73,7 +73,7 @@ export function MeasurementSchemaEditor() {
 
   useEffect(() => {
     (async () => {
-      const response = await fetch("/api/admin/schema");
+      const response = await fetch("/api/member/schema");
       const payload = await response.json().catch(() => null);
       if (response.ok && payload?.schema) setDoc(payload.schema as SchemaDoc);
       setLoading(false);
@@ -210,7 +210,7 @@ export function MeasurementSchemaEditor() {
     }
     setSaving(true);
     try {
-      const response = await fetch("/api/admin/schema", {
+      const response = await fetch("/api/member/schema", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ schema: doc }),

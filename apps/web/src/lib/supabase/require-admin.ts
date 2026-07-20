@@ -10,7 +10,7 @@ export type RequireRoleResult =
   | { ok: false; response: NextResponse };
 export type RequireAdminResult = RequireRoleResult;
 
-// middleware.ts only checks "is there a session" for /api/admin/*. This is the
+// middleware.ts only checks "is there a session" for /api/member/*. This is the
 // actual authorization check — "does this session hold one of these roles" —
 // and must be called at the top of every admin route handler, since
 // middleware is a coarse first line of defense, not the source of truth.
