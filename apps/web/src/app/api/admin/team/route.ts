@@ -65,44 +65,55 @@ export async function POST(request: NextRequest) {
 
   // Best effort: send the branded Supabase invite email. This only works if
   // the project has SMTP configured — when it doesn't, this errors and we fall
-  // through to the link-only path below. Either way the admin gets a copyable
-  // link, so an invite always works even with email turned off.
+  // through to the link-only path below.
   let emailed = false;
   let existingUser = false;
+  let userId: string | null = null;
   const invited = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
   if (!invited.error && invited.data?.user) {
     emailed = true;
+    userId = invited.data.user.id;
   } else if (invited.error && isAlreadyRegistered(invited.error.message)) {
     existingUser = true;
   }
 
-  // Always mint a shareable action link. For a brand-new invite we use an
-  // 'invite' link (which also creates the user if the email above didn't);
-  // for an address already in the system we use a 'recovery' link, which lets
-  // an existing/half-set-up account (re)set its password. Both land on
-  // /admin/set-password.
-  let { data, error } = await admin.auth.admin.generateLink({
-    type: emailed || existingUser ? "recovery" : "invite",
-    email,
-    options: { redirectTo },
-  });
-
-  // If we guessed 'invite' but the user turned out to already exist, retry as
-  // recovery so the admin still gets a usable link.
-  if (error && isAlreadyRegistered(error.message)) {
-    existingUser = true;
-    ({ data, error } = await admin.auth.admin.generateLink({
-      type: "recovery",
+  // Only mint a separate action link when the branded email didn't already go
+  // out. generateLink() issues a brand-new token for the user, which
+  // invalidates whichever token is currently outstanding — including the one
+  // just emailed above — so calling it unconditionally used to make every
+  // emailed invite link die on arrival ("Email link is invalid or expired").
+  let actionLink: string | null = null;
+  if (!emailed) {
+    let { data, error } = await admin.auth.admin.generateLink({
+      type: existingUser ? "recovery" : "invite",
       email,
       options: { redirectTo },
-    }));
+    });
+
+    // If we guessed 'invite' but the user turned out to already exist, retry
+    // as recovery so the admin still gets a usable link.
+    if (error && isAlreadyRegistered(error.message)) {
+      existingUser = true;
+      ({ data, error } = await admin.auth.admin.generateLink({
+        type: "recovery",
+        email,
+        options: { redirectTo },
+      }));
+    }
+
+    if (error || !data?.user) {
+      return NextResponse.json(
+        { error: `Could not create the invite: ${error?.message ?? "unknown error"}` },
+        { status: 502 }
+      );
+    }
+
+    userId = data.user.id;
+    actionLink = data.properties?.action_link ?? null;
   }
 
-  if (error || !data?.user) {
-    return NextResponse.json(
-      { error: `Could not create the invite: ${error?.message ?? "unknown error"}` },
-      { status: 502 }
-    );
+  if (!userId) {
+    return NextResponse.json({ error: "Could not create the invite: no user id returned." }, { status: 502 });
   }
 
   // Apply the chosen level. The auth trigger seeds the profile as 'viewer';
@@ -111,7 +122,7 @@ export async function POST(request: NextRequest) {
   const { error: roleError } = await admin
     .from("profiles")
     .update({ role, email })
-    .eq("id", data.user.id);
+    .eq("id", userId);
 
   if (roleError) {
     return NextResponse.json({ error: `Invite created but role update failed: ${roleError.message}` }, { status: 502 });
@@ -122,7 +133,7 @@ export async function POST(request: NextRequest) {
     role,
     emailed,
     reused: existingUser,
-    actionLink: data.properties?.action_link ?? null,
+    actionLink,
   });
 }
 
