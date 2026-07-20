@@ -7,9 +7,9 @@ import type { TeamMember } from "@/lib/types";
 // Where an invited teammate lands to set their password. Prefer an explicit
 // site URL (correct behind proxies / on Vercel); fall back to the request's
 // own origin for local dev.
-function setPasswordUrl(request: NextRequest): string {
+function passwordResetUrl(request: NextRequest): string {
   const base = (process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin).replace(/\/$/, "");
-  return `${base}/admin/set-password`;
+  return `${base}/member/password-reset`;
 }
 
 // Supabase reports an already-provisioned address a few different ways
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const redirectTo = setPasswordUrl(request);
+  const redirectTo = passwordResetUrl(request);
 
   // Best effort: send the branded Supabase invite email. This only works if
   // the project has SMTP configured — when it doesn't, this errors and we fall

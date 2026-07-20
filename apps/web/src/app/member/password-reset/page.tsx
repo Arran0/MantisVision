@@ -16,7 +16,7 @@ type Phase = "verifying" | "ready" | "invalid" | "done";
 // middleware auth gate, because the token lives in the URL hash the server
 // never sees: it must render for a signed-out visitor so the client can finish
 // establishing the session.
-export default function SetPasswordPage() {
+export default function PasswordResetPage() {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("verifying");
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -125,7 +125,7 @@ export default function SetPasswordPage() {
     setPhase("done");
     // The session is already active — send them straight into the dashboard.
     setTimeout(() => {
-      router.push("/admin/home");
+      router.push("/member/home");
       router.refresh();
     }, 900);
   }
@@ -151,7 +151,7 @@ export default function SetPasswordPage() {
               type="button"
               variant="secondary"
               className="mt-4"
-              onClick={() => router.push("/admin/login")}
+              onClick={() => router.push("/member/login")}
             >
               Go to sign in
             </AdminButton>

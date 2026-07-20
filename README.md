@@ -12,7 +12,7 @@ a continuous 0–100 `health_score` that a display-level (Healthy/Moderate/Low)
 is derived from at inference.
 
 The system is **schema-driven**, not hardcoded: a single admin-editable
-**measurement schema** (`/admin/schema`) defines every per-image measurement
+**measurement schema** (`/member/schema`) defines every per-image measurement
 the model predicts — classification, regression, or segmentation — and a
 shared EfficientNet-B0 backbone grows one head per measurement automatically.
 Adding species ID, a disease model, predator detection, or damage

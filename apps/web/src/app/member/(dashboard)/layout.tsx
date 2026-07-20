@@ -3,12 +3,12 @@ import { getDashboardUser } from "@/lib/supabase/page-guards";
 import { isDashboardRole } from "@/lib/roles";
 import { AdminNav } from "@/components/admin/AdminNav";
 
-// Every authed dashboard page is wrapped by this layout. /admin/login and
-// /admin/set-password live OUTSIDE the (dashboard) route group specifically so
-// they do NOT inherit this layout — nesting login here previously caused a
+// Every authed dashboard page is wrapped by this layout. /member/login and
+// /member/password-reset live OUTSIDE the (dashboard) route group specifically
+// so they do NOT inherit this layout — nesting login here previously caused a
 // redirect loop (an unauthenticated visit would hit this layout's redirect
-// below, which points right back at login, forever), and set-password needs to
-// render before a session cookie exists so the client can finish the invite.
+// below, which points right back at login, forever), and password-reset needs
+// to render before a session cookie exists so the client can finish the invite.
 //
 // This is where the actual role check happens — middleware.ts only confirms a
 // session exists. Both admins and contributors reach the dashboard; the nav
@@ -17,7 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const user = await getDashboardUser();
 
   if (!user) {
-    redirect("/admin/login");
+    redirect("/member/login");
   }
 
   if (!isDashboardRole(user.role)) {

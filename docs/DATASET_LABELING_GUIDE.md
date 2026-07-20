@@ -10,7 +10,7 @@ annotator rather than guessing.
 There is no folder-name taxonomy anymore (no
 `<slug>_<Severity>_<Condition>_<Subtype>` folders to parse). Every per-image
 label is a **column value** against the active **measurement schema**
-(admin-editable at `/admin/schema`, or `ml/config.py`'s `DEFAULT_SCHEMA` when
+(admin-editable at `/member/schema`, or `ml/config.py`'s `DEFAULT_SCHEMA` when
 no schema has been saved yet). A split directory looks like:
 
 ```
@@ -43,7 +43,7 @@ data for this measurement yet" and conditional measurements (e.g.
 with no special-casing.
 
 In practice you label through the admin upload form
-(`/admin/dataset`), which renders one control per active measurement
+(`/member/dataset`), which renders one control per active measurement
 (dropdown for classification, number input for regression, mask upload for
 segmentation) and writes the resulting `measurements` map to Supabase; the
 retrain pipeline then materializes it into `annotations.jsonl` for training.
@@ -53,7 +53,7 @@ Hand-editing the manifest directly is only for local experiments.
 
 Out of the box (`DEFAULT_SCHEMA` in both `ml/config.py` and
 `apps/web/src/lib/schema.ts`) the schema ships with this starting set of
-columns — all of it freely editable or removable from `/admin/schema`,
+columns — all of it freely editable or removable from `/member/schema`,
 nothing is locked:
 
 | Measurement | Type | Values |
@@ -73,7 +73,7 @@ per-mineral content `mineral_ca`/`mineral_mg`/`mineral_k`/`mineral_na`
 `acid_insoluble_ash` (%), and `ash_content` (%).
 
 Add a class to `species` or `disease` (or any classification) the same way —
-edit it in `/admin/schema` (keep `NoDisease` as disease's negative if you want
+edit it in `/member/schema` (keep `NoDisease` as disease's negative if you want
 to keep that convention).
 
 `seaweed_presence` is the **primary classifier**: its `No` class (formerly
@@ -88,7 +88,7 @@ assessment on an irrelevant photo.
 that matches what the specimen actually looks like.
 
 You can add, edit, or remove any measurement (a lab value, another
-segmentation target, or one of the columns above) in `/admin/schema` — that's
+segmentation target, or one of the columns above) in `/member/schema` — that's
 an edit, not a code change; the model, losses, dataset loader, and predictor
 all grow the new head generically from the schema. A new measurement stays
 masked (untrained, no effect on other heads) until images with real values

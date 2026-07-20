@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 
 // Server-side Supabase client bound to the request's cookies (anon key,
-// respects RLS). Use in Server Components and /api/admin/* route handlers to
+// respects RLS). Use in Server Components and /api/member/* route handlers to
 // check "who is calling" — middleware.ts already refreshed the session cookie
 // before this runs.
 export function createClient() {

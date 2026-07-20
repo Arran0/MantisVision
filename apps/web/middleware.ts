@@ -1,35 +1,36 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 
-// Coarse gate for everything under /admin and /api/admin: refreshes the
+// Coarse gate for everything under /member and /api/member: refreshes the
 // Supabase session cookie and rejects unauthenticated requests outright.
 // This only checks "is there a session" — the actual admin-role check lives
-// in apps/web/src/app/admin/layout.tsx (pages) and requireAdmin() (API
-// routes), since role membership needs a DB read that's worth keeping out
-// of middleware, which runs on every matched request.
+// in apps/web/src/app/member/(dashboard)/layout.tsx (pages) and
+// requireAdmin() (API routes), since role membership needs a DB read that's
+// worth keeping out of middleware, which runs on every matched request.
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
 
   const path = request.nextUrl.pathname;
-  const isAdminApi = path.startsWith("/api/admin");
-  // /admin/login and /admin/set-password must render for signed-out visitors:
-  // login is the entry point, and set-password finishes an invite whose token
-  // arrives in the URL hash (never sent to the server) before any session
-  // cookie exists — gating it here would bounce the invitee to login first.
-  const isAdminPage =
-    path.startsWith("/admin") && path !== "/admin/login" && path !== "/admin/set-password";
+  const isMemberApi = path.startsWith("/api/member");
+  // /member/login and /member/password-reset must render for signed-out
+  // visitors: login is the entry point, and password-reset finishes an
+  // invite whose token arrives in the URL hash (never sent to the server)
+  // before any session cookie exists — gating it here would bounce the
+  // invitee to login first.
+  const isMemberPage =
+    path.startsWith("/member") && path !== "/member/login" && path !== "/member/password-reset";
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
     // Supabase isn't configured (e.g. env vars not set yet) — fail closed on
-    // admin routes rather than serving them with no auth check at all.
-    if (isAdminApi) {
+    // member routes rather than serving them with no auth check at all.
+    if (isMemberApi) {
       return NextResponse.json({ error: "Admin auth is not configured." }, { status: 503 });
     }
-    if (isAdminPage) {
-      return NextResponse.redirect(new URL("/admin/login", request.url));
+    if (isMemberPage) {
+      return NextResponse.redirect(new URL("/member/login", request.url));
     }
     return response;
   }
@@ -58,15 +59,15 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user && (isAdminApi || isAdminPage)) {
-    return isAdminApi
+  if (!user && (isMemberApi || isMemberPage)) {
+    return isMemberApi
       ? NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-      : NextResponse.redirect(new URL("/admin/login", request.url));
+      : NextResponse.redirect(new URL("/member/login", request.url));
   }
 
   return response;
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*"],
+  matcher: ["/member/:path*", "/api/member/:path*"],
 };

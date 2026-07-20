@@ -65,9 +65,9 @@ labeling anything. Consistent labels matter more than volume.
 ### 2.2 Labeling happens through the admin panel, not raw folders
 
 Per-image ground truth is **column annotations against the active
-measurement schema** (admin-editable at `/admin/schema`), not folder names —
+measurement schema** (admin-editable at `/member/schema`), not folder names —
 see `docs/DATASET_LABELING_GUIDE.md` for the schema shape and labeling rules.
-In practice you label by uploading photos through `/admin/dataset`, which
+In practice you label by uploading photos through `/member/dataset`, which
 renders one control per active measurement (dropdown, number input, or mask
 upload) and writes the result to Supabase; the "Retrain" button then
 materializes everything into the manifest format below and trains on it —
@@ -446,7 +446,7 @@ Every measurement below can be added the same way `disease_subtype` and
 change to the model, dataset loader, losses, or predictor:
 
 1. **Species Identification** — done: `species` is a classification
-   measurement in the default schema, extensible from `/admin/schema` (add a
+   measurement in the default schema, extensible from `/member/schema` (add a
    class per species with labeled data, e.g. `Eucheuma_denticulatum`,
    `Gracilaria`, `Ulva`, `Sargassum`) — no code change needed.
 2. **Predator detection** — a new classification measurement (e.g. keyed
@@ -457,10 +457,10 @@ change to the model, dataset loader, losses, or predictor:
    collected (currently masked/untrained — no data yet).
 4. **Region/pixel-level detection** — a segmentation measurement (like the
    default schema's `biofouling` slot), outputs per-pixel class coverage +
-   an overlay mask; requires mask ground truth (upload via `/admin/dataset`).
+   an overlay mask; requires mask ground truth (upload via `/member/dataset`).
 5. **Treatment Recommendation** — already schema-driven: preset
    `explanation`/`recommendation` copy lives per class, editable in
-   `/admin/schema`, and travels with the checkpoint on promotion (no
+   `/member/schema`, and travels with the checkpoint on promotion (no
    separate lookup file to maintain).
 6. **Farm Analytics** — aggregate prediction history (once an end-user
    prediction-history table is wired up in Supabase, see 7.3 above) across

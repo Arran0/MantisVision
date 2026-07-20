@@ -22,7 +22,7 @@ export default function DatasetPage() {
     if (nextPage === 1) setLoading(true);
     else setLoadingMore(true);
     try {
-      const response = await fetch(`/api/admin/dataset?page=${nextPage}`);
+      const response = await fetch(`/api/member/dataset?page=${nextPage}`);
       const payload = await response.json().catch(() => null);
       const batch: TrainingImage[] = payload?.images ?? [];
       setImages((prev) => (nextPage === 1 ? batch : [...prev, ...batch]));

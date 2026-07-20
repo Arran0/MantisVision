@@ -14,7 +14,7 @@ export function TopBarAuthButton({ signedIn }: { signedIn: boolean }) {
 
   if (!signedIn) {
     return (
-      <Link href="/admin/login" className={authButtonClass}>
+      <Link href="/member/login" className={authButtonClass}>
         Sign in
       </Link>
     );

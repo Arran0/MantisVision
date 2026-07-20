@@ -7,11 +7,11 @@ import type { Role } from "@/lib/roles";
 type NavLink = { href: string; label: string; adminOnly?: boolean };
 
 const LINKS: NavLink[] = [
-  { href: "/admin/home", label: "Home" },
-  { href: "/admin/dataset", label: "Dataset" },
-  { href: "/admin/schema", label: "Structure", adminOnly: true },
-  { href: "/admin/retrain", label: "Retrain", adminOnly: true },
-  { href: "/admin/team", label: "Team", adminOnly: true },
+  { href: "/member/home", label: "Home" },
+  { href: "/member/dataset", label: "Dataset" },
+  { href: "/member/schema", label: "Structure", adminOnly: true },
+  { href: "/member/retrain", label: "Retrain", adminOnly: true },
+  { href: "/member/team", label: "Team", adminOnly: true },
 ];
 
 export function AdminNav({ email, role }: { email: string | null; role: Role }) {
