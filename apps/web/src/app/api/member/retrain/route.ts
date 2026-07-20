@@ -77,20 +77,34 @@ export async function POST() {
   return NextResponse.json({ run: toModelRun(row) }, { status: 201 });
 }
 
+const PAGE_SIZE = 10;
+
 export async function GET(request: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
 
+  // `limit` is the size of the currently-visible window (grows by PAGE_SIZE
+  // each time "Load more" is clicked), not an offset — the whole window is
+  // refetched together so polling can refresh the status of every run
+  // already on screen, not just the first page.
+  const limit = Math.max(PAGE_SIZE, Number(request.nextUrl.searchParams.get("limit") ?? PAGE_SIZE) || PAGE_SIZE);
+
   const admin = createAdminClient();
-  const { data: rows, error } = await admin
+  const {
+    data: rows,
+    error,
+    count,
+  } = await admin
     .from("model_runs")
-    .select("*")
+    .select("*", { count: "exact" })
     .order("created_at", { ascending: false })
-    .limit(20);
+    .range(0, limit - 1);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 502 });
   }
 
-  return NextResponse.json({ runs: (rows ?? []).map(toModelRun) });
+  const total = count ?? 0;
+
+  return NextResponse.json({ runs: (rows ?? []).map(toModelRun), total, hasMore: limit < total });
 }

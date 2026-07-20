@@ -41,8 +41,8 @@ export default async function HomePage() {
   return (
     <div className="flex flex-col gap-5">
       <AdminPageHeader
-        title={`Welcome, ${user.email ?? "there"}`}
-        subtitle={`You're signed in as ${roleLabel(user.role)}.`}
+        title="Welcome back"
+        subtitle={`Signed in as ${roleLabel(user.role)}${user.email ? ` — ${user.email}` : ""}`}
       />
 
       <section className="flex flex-col gap-3">
@@ -76,8 +76,8 @@ export default async function HomePage() {
       <AdminCard className="p-5">
         <p className="text-sm text-zinc-600">
           {user.role === "admin"
-            ? "Add photos in the Dataset tab, adjust what the model predicts under Structure, kick off a run under Retrain, and invite teammates under Team."
-            : "Head to the Dataset tab to label photos — every image you add grows the training set."}
+            ? "Add photos under Dataset, edit Structure, trigger a Retrain, and invite teammates under Team."
+            : "Head to Dataset to label photos — every image you add grows the training set."}
         </p>
       </AdminCard>
     </div>

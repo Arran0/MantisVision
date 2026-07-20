@@ -6,6 +6,8 @@ import { DatasetUploadForm } from "@/components/admin/DatasetUploadForm";
 import { DatasetTable } from "@/components/admin/DatasetTable";
 import { AdminPageHeader } from "@/components/admin/ui";
 
+type ImageEdit = { id: string; measurements: Record<string, string | number>; notes: string | null; species: string | null; colour: string | null };
+
 export default function DatasetPage() {
   const [images, setImages] = useState<TrainingImage[]>([]);
   const [page, setPage] = useState(1);
@@ -41,6 +43,10 @@ export default function DatasetPage() {
     refresh();
   }, [refresh]);
 
+  function handleImageUpdated(updated: ImageEdit) {
+    setImages((prev) => prev.map((image) => (image.id === updated.id ? { ...image, ...updated } : image)));
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <AdminPageHeader title="Dataset" subtitle="Photos labeled here feed the training dataset used by a retrain run." />
@@ -52,6 +58,7 @@ export default function DatasetPage() {
         total={total}
         hasMore={hasMore}
         onLoadMore={() => loadPage(page + 1)}
+        onImageUpdated={handleImageUpdated}
       />
     </div>
   );

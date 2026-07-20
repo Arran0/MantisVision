@@ -20,15 +20,26 @@ function isAlreadyRegistered(message: string): boolean {
   return m.includes("already been registered") || m.includes("already registered") || m.includes("already exists");
 }
 
-export async function GET() {
+const PAGE_SIZE = 10;
+
+export async function GET(request: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
 
+  const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") ?? "1") || 1);
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
   const admin = createAdminClient();
-  const { data, error } = await admin
+  const {
+    data,
+    error,
+    count,
+  } = await admin
     .from("profiles")
-    .select("id, email, role, created_at")
-    .order("created_at", { ascending: true });
+    .select("id, email, role, created_at", { count: "exact" })
+    .order("created_at", { ascending: true })
+    .range(from, to);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 502 });
@@ -42,7 +53,10 @@ export async function GET() {
     isSelf: row.id === auth.context.userId,
   }));
 
-  return NextResponse.json({ members });
+  const total = count ?? 0;
+  const hasMore = page * PAGE_SIZE < total;
+
+  return NextResponse.json({ members, page, total, hasMore });
 }
 
 export async function POST(request: NextRequest) {

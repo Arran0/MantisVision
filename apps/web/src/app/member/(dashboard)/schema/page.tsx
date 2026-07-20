@@ -8,7 +8,7 @@ export default async function SchemaPage() {
     <div className="flex flex-col gap-5">
       <AdminPageHeader
         title="Dataset structure"
-        subtitle="Edit the measurements the model predicts — species included. Changes apply to labeling right away; they reach the model on the next retrain and go live when that run is promoted."
+        subtitle="Edit what the model predicts. Changes apply to labeling right away, and reach the model on the next retrain + promote."
       />
       <MeasurementSchemaEditor />
     </div>
