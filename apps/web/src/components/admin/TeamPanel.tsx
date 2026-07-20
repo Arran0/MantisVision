@@ -23,7 +23,13 @@ function roleTone(role: Role): "dewberry" | "seaweed" | "zinc" {
 
 export function TeamPanel() {
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  // `loading` covers the first page (fresh list); `loadingMore` covers
+  // appending a subsequent page so the two states don't fight over the UI.
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("contributor");
@@ -32,16 +38,26 @@ export function TeamPanel() {
   const [invite, setInvite] = useState<InviteResult | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  // Loads one page of 10. page 1 replaces the list (used on mount and after an
+  // invite); later pages are appended into the scrollable member list below.
+  const loadPage = useCallback(async (nextPage: number) => {
+    if (nextPage === 1) setLoading(true);
+    else setLoadingMore(true);
     try {
-      const response = await fetch("/api/member/team");
+      const response = await fetch(`/api/member/team?page=${nextPage}`);
       const payload = await response.json().catch(() => null);
-      setMembers(payload?.members ?? []);
+      const batch: TeamMember[] = payload?.members ?? [];
+      setMembers((prev) => (nextPage === 1 ? batch : [...prev, ...batch]));
+      setPage(nextPage);
+      setTotal(payload?.total ?? batch.length);
+      setHasMore(Boolean(payload?.hasMore));
     } finally {
-      setLoading(false);
+      if (nextPage === 1) setLoading(false);
+      else setLoadingMore(false);
     }
   }, []);
+
+  const refresh = useCallback(() => loadPage(1), [loadPage]);
 
   useEffect(() => {
     refresh();
@@ -170,37 +186,53 @@ export function TeamPanel() {
         ) : members.length === 0 ? (
           <p className="px-4 py-3 text-sm text-zinc-500">No members yet.</p>
         ) : (
-          members.map((member) => (
-            <div
-              key={member.id}
-              className="flex items-center border-b border-zinc-100 px-4 py-2.5 last:border-0 hover:bg-zinc-50"
-            >
-              <span className="flex flex-1 items-center gap-2 truncate text-sm text-zinc-800">
-                <span className="truncate">{member.email ?? "—"}</span>
-                {member.isSelf && <AdminBadge tone="amber">You</AdminBadge>}
-              </span>
-              <span className="w-40 flex-shrink-0">
-                {member.isSelf ? (
-                  <AdminBadge tone={roleTone(member.role)}>{roleLabel(member.role)}</AdminBadge>
-                ) : (
-                  <AdminSelect
-                    value={member.role}
-                    onChange={(event) => changeRole(member.id, event.target.value as Role)}
-                    className="max-w-[9rem] py-1.5 text-xs"
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="contributor">Contributor</option>
-                    <option value="viewer">No access</option>
-                  </AdminSelect>
-                )}
-              </span>
-              <span className="hidden w-28 flex-shrink-0 text-right text-xs text-zinc-400 sm:block">
-                {new Date(member.createdAt).toLocaleDateString()}
-              </span>
-            </div>
-          ))
+          <div className="max-h-[26rem] overflow-y-auto">
+            {members.map((member) => (
+              <div
+                key={member.id}
+                className="flex items-center border-b border-zinc-100 px-4 py-2.5 last:border-0 hover:bg-zinc-50"
+              >
+                <span className="flex flex-1 items-center gap-2 truncate text-sm text-zinc-800">
+                  <span className="truncate">{member.email ?? "—"}</span>
+                  {member.isSelf && <AdminBadge tone="amber">You</AdminBadge>}
+                </span>
+                <span className="w-40 flex-shrink-0">
+                  {member.isSelf ? (
+                    <AdminBadge tone={roleTone(member.role)}>{roleLabel(member.role)}</AdminBadge>
+                  ) : (
+                    <AdminSelect
+                      value={member.role}
+                      onChange={(event) => changeRole(member.id, event.target.value as Role)}
+                      className="max-w-[9rem] py-1.5 text-xs"
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="contributor">Contributor</option>
+                      <option value="viewer">No access</option>
+                    </AdminSelect>
+                  )}
+                </span>
+                <span className="hidden w-28 flex-shrink-0 text-right text-xs text-zinc-400 sm:block">
+                  {new Date(member.createdAt).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
       </AdminCard>
+
+      {!loading && members.length > 0 && (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-zinc-500">
+            Showing {members.length}
+            {total > 0 ? ` of ${total}` : ""} member{members.length === 1 ? "" : "s"}
+          </p>
+          {hasMore && (
+            <AdminButton type="button" variant="secondary" onClick={() => loadPage(page + 1)} disabled={loadingMore}>
+              {loadingMore ? "Loading…" : "Load more"}
+            </AdminButton>
+          )}
+        </div>
+      )}
     </div>
   );
 }

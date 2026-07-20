@@ -13,7 +13,7 @@ import type { TrainingImage } from "@/lib/types";
 
 const IMAGES_BUCKET = "training-images";
 const MASKS_BUCKET = "training-masks";
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 10;
 const SIGNED_URL_TTL_S = 60 * 5;
 
 function extensionFor(file: File): string {
@@ -23,8 +23,24 @@ function extensionFor(file: File): string {
   return fromType && fromType.length <= 5 ? fromType.toLowerCase() : "jpg";
 }
 
-function stringOrNull(value: FormDataEntryValue | null): string | null {
+function stringOrNull(value: FormDataEntryValue | string | null | undefined): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+// Legacy flat columns are populated opportunistically from the well-known
+// measurement keys (for existing queries/back-compat); they're no longer the
+// source of truth for training — `measurements` is. Both the new keys and the
+// pre-restructure names are accepted so a mixed dataset keeps filling these
+// columns. Species and colour are just schema classifications now
+// (measurements["species"] / measurements["colour"]), same as any other — no
+// more special-cased form fields or a schema-level "active species".
+function measurementString(measurements: Record<string, string | number>, ...keys: string[]): string | null {
+  for (const key of keys) if (typeof measurements[key] === "string") return measurements[key] as string;
+  return null;
+}
+function measurementNumber(measurements: Record<string, string | number>, ...keys: string[]): number | null {
+  for (const key of keys) if (typeof measurements[key] === "number") return measurements[key] as number;
+  return null;
 }
 
 // Parses+validates the client-submitted `measurements` JSON field against the
@@ -119,35 +135,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 502 });
   }
 
-  // Legacy flat columns are populated opportunistically from the well-known
-  // measurement keys (for existing queries/back-compat); they're no longer
-  // the source of truth for training — `measurements` is. Both the new keys
-  // and the pre-restructure names are accepted so a mixed dataset keeps
-  // filling these columns. Species and colour are just schema classifications
-  // now (measurements["species"] / measurements["colour"]), same as any other
-  // — no more special-cased form fields or a schema-level "active species".
-  const measurementString = (...keys: string[]): string | null => {
-    for (const key of keys) if (typeof measurements[key] === "string") return measurements[key] as string;
-    return null;
-  };
-  const measurementNumber = (...keys: string[]): number | null => {
-    for (const key of keys) if (typeof measurements[key] === "number") return measurements[key] as number;
-    return null;
-  };
   const { data: row, error: insertError } = await admin
     .from("training_images")
     .insert({
       created_by: auth.context.userId,
       storage_path: storagePath,
       measurements,
-      condition: measurementString("health_status", "condition"),
-      subtype: measurementString("disease", "disease_subtype"),
-      health_score: measurementNumber("health_score"),
-      dried_pct: measurementNumber("dried", "dried_extent"),
-      decayed_pct: measurementNumber("decayed", "decayed_extent"),
+      condition: measurementString(measurements, "health_status", "condition"),
+      subtype: measurementString(measurements, "disease", "disease_subtype"),
+      health_score: measurementNumber(measurements, "health_score"),
+      dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
+      decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
       is_background: isBackground,
-      species: measurementString("species"),
-      colour: measurementString("colour"),
+      species: measurementString(measurements, "species"),
+      colour: measurementString(measurements, "colour"),
       notes: stringOrNull(formData.get("notes")),
     })
     .select()
@@ -213,4 +214,64 @@ export async function GET(request: NextRequest) {
   const hasMore = page * PAGE_SIZE < total;
 
   return NextResponse.json({ images, page, pageSize: PAGE_SIZE, total, hasMore });
+}
+
+// Edits the feature-column (measurement) values and notes of an
+// already-uploaded photo — e.g. fixing a mislabeled class after the fact —
+// without re-uploading the image itself.
+export async function PATCH(request: NextRequest) {
+  const auth = await requireContributor();
+  if (!auth.ok) return auth.response;
+
+  const body = await request.json().catch(() => null);
+  const id = typeof body?.id === "string" ? body.id : "";
+  if (!id) {
+    return NextResponse.json({ error: "Missing 'id'." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const schema = await getActiveSchema(admin);
+
+  const validated = validateMeasurements(schema, body?.measurements ?? {});
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
+  }
+  const measurements = validated.values;
+
+  const primary = getPrimaryClassification(schema);
+  const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
+  const isBackground = !!primary && primaryValue === primary.background_class;
+
+  const { data: row, error: updateError } = await admin
+    .from("training_images")
+    .update({
+      measurements,
+      condition: measurementString(measurements, "health_status", "condition"),
+      subtype: measurementString(measurements, "disease", "disease_subtype"),
+      health_score: measurementNumber(measurements, "health_score"),
+      dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
+      decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
+      is_background: isBackground,
+      species: measurementString(measurements, "species"),
+      colour: measurementString(measurements, "colour"),
+      notes: stringOrNull(body?.notes),
+    })
+    .eq("id", id)
+    .select("id, species, colour, measurements, notes")
+    .single();
+
+  if (updateError || !row) {
+    return NextResponse.json(
+      { error: `Failed to save the edit: ${updateError?.message ?? "photo not found"}` },
+      { status: 502 }
+    );
+  }
+
+  return NextResponse.json({
+    id: row.id,
+    species: row.species,
+    colour: row.colour,
+    measurements: (row.measurements as Record<string, string | number>) ?? {},
+    notes: row.notes,
+  });
 }
