@@ -174,9 +174,9 @@ export function TeamPanel() {
       </AdminCard>
 
       <AdminCard className="overflow-hidden">
-        <div className="flex bg-dewberry-900 px-4 py-2.5">
+        <div className="flex items-center gap-2 bg-dewberry-900 px-3 py-2.5 sm:gap-3 sm:px-4">
           <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Member</span>
-          <span className="w-40 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Level</span>
+          <span className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:w-40">Level</span>
           <span className="hidden w-28 flex-shrink-0 text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
             Added
           </span>
@@ -190,20 +190,20 @@ export function TeamPanel() {
             {members.map((member) => (
               <div
                 key={member.id}
-                className="flex items-center border-b border-zinc-100 px-4 py-2.5 last:border-0 hover:bg-zinc-50"
+                className="flex items-center gap-2 border-b border-zinc-100 px-3 py-2.5 last:border-0 hover:bg-zinc-50 sm:gap-3 sm:px-4"
               >
-                <span className="flex flex-1 items-center gap-2 truncate text-sm text-zinc-800">
+                <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-sm text-zinc-800">
                   <span className="truncate">{member.email ?? "—"}</span>
                   {member.isSelf && <AdminBadge tone="amber">You</AdminBadge>}
                 </span>
-                <span className="w-40 flex-shrink-0">
+                <span className="w-32 flex-shrink-0 sm:w-40">
                   {member.isSelf ? (
                     <AdminBadge tone={roleTone(member.role)}>{roleLabel(member.role)}</AdminBadge>
                   ) : (
                     <AdminSelect
                       value={member.role}
                       onChange={(event) => changeRole(member.id, event.target.value as Role)}
-                      className="max-w-[9rem] py-1.5 text-xs"
+                      className="w-full px-2 py-1.5 text-xs sm:max-w-[9rem] sm:px-3"
                     >
                       <option value="admin">Admin</option>
                       <option value="contributor">Contributor</option>

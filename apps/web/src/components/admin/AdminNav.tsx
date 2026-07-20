@@ -20,15 +20,15 @@ export function AdminNav({ email, role }: { email: string | null; role: Role }) 
   const links = LINKS.filter((link) => !link.adminOnly || role === "admin");
 
   return (
-    <nav className="flex flex-wrap items-center gap-4 border-b border-zinc-200 pb-3">
-      <div className="flex flex-wrap gap-1">
+    <nav className="flex flex-wrap items-center gap-2 border-b border-zinc-200 pb-3 sm:gap-4">
+      <div className="flex flex-wrap gap-0.5 sm:gap-1">
         {links.map((link) => {
           const active = pathname === link.href;
           return (
             <Link
               key={link.href}
               href={link.href}
-              className={`rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`rounded-sm px-2 py-1.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
                 active ? "bg-dewberry-600 text-white" : "text-zinc-600 hover:bg-zinc-100"
               }`}
             >

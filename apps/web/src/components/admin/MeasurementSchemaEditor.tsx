@@ -238,10 +238,9 @@ export function MeasurementSchemaEditor() {
         <div>
           <h2 className={`${sectionHeadingClass} mt-0`}>Measurements</h2>
           <p className="text-sm text-zinc-600">
-            Each measurement is one column collected per photo and one head the model predicts: a classification
-            (named classes), a regression (a continuous value), or a segmentation (a per-pixel mask). Everything here
-            — label, type, classes, gating — is freely editable or removable. Add one to teach the model a new
-            metric; it stays untrained until labeled photos supply values for it.
+            One measurement = one column per photo and one thing the model predicts (classification, regression, or
+            segmentation). Everything below is editable — add one to teach the model something new; it stays
+            untrained until labeled photos supply values.
           </p>
         </div>
         <AnimatePresence initial={false}>

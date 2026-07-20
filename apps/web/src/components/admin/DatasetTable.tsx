@@ -293,17 +293,17 @@ export function DatasetTable({
   return (
     <div className="flex flex-col gap-3">
       <AdminCard className="overflow-hidden">
-        <div className="flex bg-dewberry-900 px-4 py-2.5">
-          <span className="w-16 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Photo</span>
+        <div className="flex items-center gap-2 bg-dewberry-900 px-3 py-2.5 sm:gap-3 sm:px-4">
+          <span className="w-11 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:w-16">Photo</span>
           <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Species</span>
           <span className="hidden flex-[2] text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
             Measurements
           </span>
-          <span className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Status</span>
+          <span className="w-16 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:w-24">Status</span>
           <span className="hidden w-28 flex-shrink-0 text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
             Added
           </span>
-          <span className="w-14 flex-shrink-0 text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+          <span className="w-8 flex-shrink-0 text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:w-14">
             Edit
           </span>
         </div>
@@ -311,37 +311,38 @@ export function DatasetTable({
           {images.map((image) => (
             <div
               key={image.id}
-              className="flex items-center gap-0 border-b border-zinc-100 px-4 py-2.5 last:border-0 hover:bg-zinc-50"
+              className="flex items-center gap-2 border-b border-zinc-100 px-3 py-2.5 last:border-0 hover:bg-zinc-50 sm:gap-3 sm:px-4"
             >
-              <div className="w-16 flex-shrink-0">
+              <div className="w-11 flex-shrink-0 sm:w-16">
                 {image.thumbnailUrl ? (
                   <button
                     type="button"
                     onClick={() => setPreview(image)}
-                    className="block h-12 w-12 overflow-hidden border border-zinc-200 transition-opacity hover:opacity-80"
+                    className="block h-9 w-9 overflow-hidden border border-zinc-200 transition-opacity hover:opacity-80 sm:h-12 sm:w-12"
                     aria-label="Preview photo"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={image.thumbnailUrl} alt="" className="h-full w-full object-cover" />
                   </button>
                 ) : (
-                  <div className="h-12 w-12 border border-zinc-200 bg-zinc-100" />
+                  <div className="h-9 w-9 border border-zinc-200 bg-zinc-100 sm:h-12 sm:w-12" />
                 )}
               </div>
-              <span className="flex-1 truncate text-sm italic text-zinc-800">{image.species ?? "—"}</span>
+              <span className="min-w-0 flex-1 truncate text-sm italic text-zinc-800">{image.species ?? "—"}</span>
               <span className="hidden flex-[2] truncate text-xs text-zinc-600 sm:block">
                 {measurementSummary(image.measurements)}
               </span>
-              <span className="w-24 flex-shrink-0 text-xs text-zinc-600">{image.status}</span>
+              <span className="w-16 flex-shrink-0 truncate text-[11px] text-zinc-600 sm:w-24 sm:text-xs">{image.status}</span>
               <span className="hidden w-28 flex-shrink-0 text-right text-xs text-zinc-400 sm:block">
                 {new Date(image.createdAt).toLocaleDateString()}
               </span>
-              <span className="w-14 flex-shrink-0 text-right">
+              <span className="w-8 flex-shrink-0 text-right sm:w-14">
                 <button
                   type="button"
                   onClick={() => setEditing(image)}
                   disabled={!schema}
-                  className="text-xs font-medium text-dewberry-700 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:text-zinc-300"
+                  className="text-[11px] font-medium text-dewberry-700 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:text-zinc-300 sm:text-xs"
+                  aria-label="Edit labels"
                 >
                   Edit
                 </button>
