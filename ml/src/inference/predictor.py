@@ -85,14 +85,16 @@ class PredictionResult:
     measurements: dict[str, MeasurementResult]
 
 
-def _augmented_recommendation(m: MeasurementDef, class_def: ClassDef | None, schema: Schema, predicted: dict) -> str:
+def _augmented_recommendation(m: MeasurementDef, class_def: ClassDef | None, schema: Schema, predicted: dict) -> str | None:
     """A classification's recommendation, plus any *child* measurement's
     predicted class note — the generic form of "Disease's recommendation
     plus the predicted subtype's note" (child = a measurement whose
-    applies_when gates on this exact m.key/class_def.name)."""
-    base = (class_def.recommendation if class_def and class_def.recommendation else None) or (
-        "No recommendation available for this class yet."
-    )
+    applies_when gates on this exact m.key/class_def.name). Returns None
+    (rather than a filler string) when this particular measurement has
+    nothing to say, so an aggregate across every measurement isn't padded
+    with placeholder noise from ones the admin hasn't written copy for yet —
+    the "nothing to show at all" fallback is applied once, downstream."""
+    base = class_def.recommendation if class_def and class_def.recommendation else None
     notes: list[str] = []
     if class_def is not None:
         for child in schema.measurements:
@@ -105,7 +107,31 @@ def _augmented_recommendation(m: MeasurementDef, class_def: ClassDef | None, sch
             child_class_def = next((c for c in child.classes if c.name == child_class_name), None)
             if child_class_def and child_class_def.note:
                 notes.append(child_class_def.note)
-    return " ".join([base, *notes]) if notes else base
+    parts = ([base] if base else []) + notes
+    return " ".join(parts) if parts else None
+
+
+def _collect_copy(schema: Schema, measurements: dict[str, MeasurementResult]) -> tuple[str, str]:
+    """Combine every applicable measurement's explanation/recommendation into
+    the flat top-level fields the current PWA renders, instead of surfacing
+    only one measurement's copy (e.g. health_status) and silently dropping
+    the rest (disease, colour, any regression's per-range copy, ...).
+    Measurements that don't apply (gated off by applies_when) or that have no
+    admin-authored copy contribute nothing; schema order determines the
+    order the sentences appear in."""
+    explanations = [
+        result.explanation
+        for m in schema.measurements
+        if (result := measurements.get(m.key)) is not None and result.explanation
+    ]
+    recommendations = [
+        result.recommendation
+        for m in schema.measurements
+        if (result := measurements.get(m.key)) is not None and result.recommendation
+    ]
+    explanation = " ".join(explanations) if explanations else "No explanation available yet."
+    recommendation = " ".join(recommendations) if recommendations else "No recommendation available yet."
+    return explanation, recommendation
 
 
 def _encode_seg_overlay_png(class_map: torch.Tensor, seg_classes: list) -> str:
@@ -216,7 +242,6 @@ class Predictor:
         # schema has them, falling back to the older names so pre-restructure
         # checkpoints keep populating the same PWA shape. ---
         confidence = classification_confidence.get(primary.key, 0.0) if primary else 0.0
-        primary_result = measurements.get(primary.key) if primary else None
 
         def first_result(*keys: str):
             for key in keys:
@@ -255,9 +280,6 @@ class Predictor:
         if disease_value == "NoDisease":
             disease_value = None
 
-        # Prefer the subject-level classification's copy for a present specimen;
-        # the primary classifier's copy is only useful for the no-subject case.
-        copy_result = health_status_result if (not is_background and health_status_result is not None) else primary_result
         # For the flat `condition` field, prefer the health status label.
         condition_name = (
             health_status_result.value
@@ -268,6 +290,8 @@ class Predictor:
         gradcam_b64 = ""
         if primary is not None:
             gradcam_b64 = self._maybe_gradcam(image, primary.key, predicted_index[primary.key])
+
+        explanation, recommendation = _collect_copy(schema, measurements)
 
         del input_tensor
         return PredictionResult(
@@ -280,8 +304,8 @@ class Predictor:
             disease_subtype=disease_value,
             dried_pct=(dried_result.value if dried_result and isinstance(dried_result.value, (int, float)) else None),
             decayed_pct=(decayed_result.value if decayed_result and isinstance(decayed_result.value, (int, float)) else None),
-            explanation=(copy_result.explanation if copy_result and copy_result.explanation else "No explanation available yet."),
-            recommendation=(copy_result.recommendation if copy_result and copy_result.recommendation else "No recommendation available yet."),
+            explanation=explanation,
+            recommendation=recommendation,
             gradcam_base64_png=gradcam_b64,
             measurements=measurements,
         )
