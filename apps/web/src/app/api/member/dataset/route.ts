@@ -16,6 +16,7 @@ const MASKS_BUCKET = "training-masks";
 const PAGE_SIZE = 10;
 const SIGNED_URL_TTL_S = 60 * 5;
 const MAX_BULK_FILES = 100;
+const UPLOAD_CONCURRENCY = 6;
 const DATASET_COLUMNS = "id, created_at, created_by, species, colour, measurements, notes, status, storage_path, split";
 const SPLIT_VALUES = new Set(["train", "validation", "test"]);
 
@@ -73,6 +74,22 @@ function rowMatchesFilters(row: DatasetRow, filters: DatasetFilterQuery): boolea
     if (!filters.splits.includes(splitLabel)) return false;
   }
   return true;
+}
+
+// Runs `fn` over `items` with at most `limit` calls in flight at once,
+// preserving result order. Used for per-file storage uploads, which are
+// independent network round-trips and don't need to be serialized.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (let i = next++; i < items.length; i = next++) {
+      const item = items[i] as T;
+      results[i] = await fn(item, i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 function extensionFor(file: File): string {
@@ -198,47 +215,62 @@ export async function POST(request: NextRequest) {
 
   // The labels (measurements/notes) are shared across the whole batch — each
   // file just gets its own storage object and its own `training_images` row.
-  // One file failing (e.g. a storage hiccup) doesn't stop the rest.
-  const results: { file: string; id?: string; error?: string }[] = [];
-  for (const file of files) {
-    const storagePath = `${primaryValue ?? "uncategorized"}/${crypto.randomUUID()}.${extensionFor(file)}`;
+  // Uploads run with bounded concurrency (they're independent network calls),
+  // then all rows are written in a single insert instead of one per file.
+  // One file's storage upload failing doesn't stop the rest.
+  type UploadOutcome =
+    | { ok: true; index: number; file: File; storagePath: string }
+    | { ok: false; index: number; file: File; error: string };
 
+  const outcomes = await mapWithConcurrency<File, UploadOutcome>(files, UPLOAD_CONCURRENCY, async (file, index) => {
+    const storagePath = `${primaryValue ?? "uncategorized"}/${crypto.randomUUID()}.${extensionFor(file)}`;
     const { error: uploadError } = await admin.storage
       .from(IMAGES_BUCKET)
       .upload(storagePath, await file.arrayBuffer(), { contentType: file.type });
-
     if (uploadError) {
-      results.push({ file: file.name, error: `Upload failed: ${uploadError.message}` });
-      continue;
+      return { ok: false, index, file, error: `Upload failed: ${uploadError.message}` };
     }
+    return { ok: true, index, file, storagePath };
+  });
 
-    const { data: row, error: insertError } = await admin
+  const results: { file: string; id?: string; error?: string }[] = new Array(files.length);
+  for (const outcome of outcomes) {
+    if (!outcome.ok) results[outcome.index] = { file: outcome.file.name, error: outcome.error };
+  }
+  const uploaded = outcomes.filter((o): o is Extract<UploadOutcome, { ok: true }> => o.ok);
+
+  if (uploaded.length > 0) {
+    const { data: rows, error: insertError } = await admin
       .from("training_images")
-      .insert({
-        created_by: auth.context.userId,
-        storage_path: storagePath,
-        measurements,
-        condition: measurementString(measurements, "health_status", "condition"),
-        subtype: measurementString(measurements, "disease", "disease_subtype"),
-        health_score: measurementNumber(measurements, "health_score"),
-        dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
-        decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
-        is_background: isBackground,
-        species: measurementString(measurements, "species"),
-        colour: measurementString(measurements, "colour"),
-        notes,
-      })
-      .select()
-      .single();
+      .insert(
+        uploaded.map(({ storagePath }) => ({
+          created_by: auth.context.userId,
+          storage_path: storagePath,
+          measurements,
+          condition: measurementString(measurements, "health_status", "condition"),
+          subtype: measurementString(measurements, "disease", "disease_subtype"),
+          health_score: measurementNumber(measurements, "health_score"),
+          dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
+          decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
+          is_background: isBackground,
+          species: measurementString(measurements, "species"),
+          colour: measurementString(measurements, "colour"),
+          notes,
+        }))
+      )
+      .select();
 
-    if (insertError || !row) {
-      // Don't leave an orphaned object in storage if the DB insert failed.
-      await admin.storage.from(IMAGES_BUCKET).remove([storagePath]);
-      results.push({ file: file.name, error: `Failed to save the label: ${insertError?.message ?? "unknown error"}` });
-      continue;
+    if (insertError || !rows || rows.length !== uploaded.length) {
+      // Don't leave orphaned objects in storage if the batch insert failed.
+      await Promise.all(uploaded.map(({ storagePath }) => admin.storage.from(IMAGES_BUCKET).remove([storagePath])));
+      for (const { index, file } of uploaded) {
+        results[index] = { file: file.name, error: `Failed to save the label: ${insertError?.message ?? "unknown error"}` };
+      }
+    } else {
+      uploaded.forEach(({ index, file }, i) => {
+        results[index] = { file: file.name, id: (rows[i] as (typeof rows)[number]).id };
+      });
     }
-
-    results.push({ file: file.name, id: row.id });
   }
 
   const allFailed = results.every((r) => r.error);
