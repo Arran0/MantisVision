@@ -205,3 +205,37 @@ def test_materialize_new_labels_writes_a_dataset_the_annotated_dataset_can_load(
 
     assert total_loaded == len(TRAINING_IMAGES_ROWS)
     assert saw_real_mask, "the one row with a biofouling mask should have produced a real (unmasked) seg target"
+
+
+def test_materialize_new_labels_respects_a_pinned_split(mock_supabase, tmp_path, monkeypatch):
+    # A row with training_images.split set (an admin's manual pin from the
+    # Dataset page) must land in exactly that split, bypassing split_class's
+    # random assignment; unpinned rows are unaffected.
+    import config as config_module
+    from scripts.retrain_and_report import materialize_new_labels
+
+    monkeypatch.setattr(config_module.config, "dataset_root", tmp_path / "dataset")
+    monkeypatch.setattr(config_module.config, "image_size", 16)
+    cfg = config_module.config
+
+    schema = schema_from_dict(SCHEMA_DOC)
+    pinned_row = {**TRAINING_IMAGES_ROWS[0], "split": "test"}
+    unpinned_rows = [{**row, "split": None} for row in TRAINING_IMAGES_ROWS[1:]]
+    images = [pinned_row, *unpinned_rows]
+
+    raw_dir = tmp_path / "_incoming"
+    total = materialize_new_labels(images, schema, raw_dir)
+    assert total == len(images)
+
+    test_manifest = cfg.test_dir / "annotations.jsonl"
+    assert test_manifest.exists()
+    test_filenames = [json.loads(line)["filename"] for line in test_manifest.read_text().splitlines()]
+    assert f"{pinned_row['id']}.jpg" in test_filenames
+
+    # The pinned row must not also appear in train/validation.
+    for split_dir in (cfg.train_dir, cfg.val_dir):
+        manifest = split_dir / "annotations.jsonl"
+        if not manifest.exists():
+            continue
+        filenames = [json.loads(line)["filename"] for line in manifest.read_text().splitlines()]
+        assert f"{pinned_row['id']}.jpg" not in filenames

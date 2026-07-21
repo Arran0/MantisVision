@@ -84,11 +84,12 @@ def update_run(model_run_id: str, **fields) -> None:
 def fetch_labeled_images() -> list[dict]:
     # Which measurement keys matter is schema-defined now, not a fixed column
     # list, so pull the whole `measurements` map per row instead of naming
-    # individual columns.
+    # individual columns. `split` is an admin-chosen train/validation/test
+    # pin (see materialize_new_labels) — null means "assign automatically".
     result = _supabase_request(
         "GET",
         "training_images",
-        params="?status=eq.labeled&select=id,storage_path,measurements",
+        params="?status=eq.labeled&select=id,storage_path,measurements,split",
     )
     return result or []
 
@@ -131,6 +132,9 @@ def maybe_pull_kaggle_archive() -> None:
         print(f"Could not pull Kaggle archive ({e}); continuing with newly labeled images only.")
 
 
+SPLIT_NAMES = ("train", "validation", "test")
+
+
 def materialize_new_labels(images: list[dict], schema: Schema, raw_dir: Path) -> int:
     """Downloads each labeled row's photo (and any segmentation mask files
     its measurements reference) into a flat staging area, splits the ROWS
@@ -139,7 +143,12 @@ def materialize_new_labels(images: list[dict], schema: Schema, raw_dir: Path) ->
     A value missing from a row's `measurements` map simply isn't written into
     that row's manifest entry — src.data.annotations.derive_targets treats an
     absent key as "no ground truth yet" and masks it out of that head's loss,
-    it does not fabricate a placeholder value."""
+    it does not fabricate a placeholder value.
+
+    A row whose `training_images.split` column is set (an admin pinned it to
+    a specific split from the Dataset page's Edit form) goes straight to that
+    split; everything else falls back to split_class's random ratio-based
+    assignment, applied only across the unpinned remainder."""
     staged: list[dict] = []
     for image in images:
         image_id = image["id"]
@@ -162,11 +171,24 @@ def materialize_new_labels(images: list[dict], schema: Schema, raw_dir: Path) ->
             else:
                 row_measurements[m.key] = value
 
-        staged.append({"filename": filename, "measurements": row_measurements, "masks": row_masks})
+        pinned_split = image.get("split")
+        staged.append({
+            "filename": filename,
+            "measurements": row_measurements,
+            "masks": row_masks,
+            "pinned_split": pinned_split if pinned_split in SPLIT_NAMES else None,
+        })
+
+    pinned: dict[str, list[dict]] = {name: [] for name in SPLIT_NAMES}
+    unpinned: list[dict] = []
+    for row in staged:
+        target = row.pop("pinned_split")
+        (pinned[target] if target else unpinned).append(row)
 
     # split_class is a plain list splitter despite its class-folder-oriented
     # name/docstring (scripts/split_dataset.py) — reused here for row dicts.
-    splits = split_class(staged, config.seed)
+    auto_splits = split_class(unpinned, config.seed)
+    splits = {name: pinned[name] + auto_splits[name] for name in SPLIT_NAMES}
 
     total = 0
     for split_name, split_rows in splits.items():
@@ -191,7 +213,10 @@ def materialize_new_labels(images: list[dict], schema: Schema, raw_dir: Path) ->
                 f.write("\n".join(manifest_lines) + "\n")
         total += len(split_rows)
 
-    print(f"Materialized {total} newly labeled images across train/validation/test.")
+    pinned_total = sum(len(rows) for rows in pinned.values())
+    counts = ", ".join(f"{name}={len(splits[name])}" for name in SPLIT_NAMES)
+    pinned_note = f"; {pinned_total} manually pinned" if pinned_total else ""
+    print(f"Materialized {total} newly labeled images across train/validation/test ({counts}){pinned_note}.")
     return total
 
 

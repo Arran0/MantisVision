@@ -12,7 +12,20 @@ import {
   AdminTextarea,
 } from "@/components/admin/ui";
 
-type ImageEdit = { id: string; measurements: Record<string, string | number>; notes: string | null; species: string | null; colour: string | null };
+type ImageEdit = {
+  id: string;
+  measurements: Record<string, string | number>;
+  notes: string | null;
+  species: string | null;
+  colour: string | null;
+  split: "train" | "validation" | "test" | null;
+};
+
+const SPLIT_LABELS: Record<string, string> = { train: "Train", validation: "Validation", test: "Test" };
+
+function splitLabel(split: string | null): string {
+  return split ? (SPLIT_LABELS[split] ?? split) : "Auto";
+}
 
 function measurementSummary(measurements: Record<string, string | number>): string {
   const entries = Object.entries(measurements);
@@ -110,6 +123,7 @@ function EditImageModal({
     return init;
   });
   const [notes, setNotes] = useState(image.notes ?? "");
+  const [split, setSplit] = useState<string>(image.split ?? "auto");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -154,7 +168,7 @@ function EditImageModal({
       const response = await fetch("/api/member/dataset", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: image.id, measurements, notes }),
+        body: JSON.stringify({ id: image.id, measurements, notes, split }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error ?? `Update failed (HTTP ${response.status}).`);
@@ -190,6 +204,15 @@ function EditImageModal({
           </button>
         </div>
         <form onSubmit={handleSave} className="flex flex-col gap-4 overflow-y-auto p-4">
+          <AdminField label="Dataset split (which retrain bucket this photo is used for)">
+            <AdminSelect value={split} onChange={(event) => setSplit(event.target.value)}>
+              <option value="auto">Auto (assigned automatically at retrain time)</option>
+              <option value="train">Train</option>
+              <option value="validation">Validation</option>
+              <option value="test">Test</option>
+            </AdminSelect>
+          </AdminField>
+
           {schema.measurements.map((m) => {
             if (!measurementApplies(m, classValues)) return null;
 
@@ -300,6 +323,9 @@ export function DatasetTable({
             Measurements
           </span>
           <span className="w-16 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:w-24">Status</span>
+          <span className="hidden w-20 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
+            Split
+          </span>
           <span className="hidden w-28 flex-shrink-0 text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 sm:block">
             Added
           </span>
@@ -333,6 +359,9 @@ export function DatasetTable({
                 {measurementSummary(image.measurements)}
               </span>
               <span className="w-16 flex-shrink-0 truncate text-[11px] text-zinc-600 sm:w-24 sm:text-xs">{image.status}</span>
+              <span className="hidden w-20 flex-shrink-0 truncate text-[11px] text-zinc-600 sm:block sm:text-xs">
+                {splitLabel(image.split)}
+              </span>
               <span className="hidden w-28 flex-shrink-0 text-right text-xs text-zinc-400 sm:block">
                 {new Date(image.createdAt).toLocaleDateString()}
               </span>
