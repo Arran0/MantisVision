@@ -146,23 +146,31 @@ def evaluate(checkpoint_path: Path | None = None, cfg: Config | None = None) -> 
             }
 
             roc_auc: dict[str, float | None] = {}
-            try:
-                auc_scores = roc_auc_score(
-                    labels_arr, probs_arr, multi_class="ovr", average=None, labels=list(range(len(class_names)))
-                )
-                # A class with only one label present in this test split (0 or
-                # all support) makes its one-vs-rest AUC undefined — sklearn
-                # returns NaN for that entry (with an UndefinedMetricWarning)
-                # rather than raising, unlike the all-classes-missing case
-                # below. NaN must not reach json.dumps: Python serializes it
-                # as the bare token `NaN`, which PostgREST rejects as invalid
-                # JSON (opaque HTTP 400), so map it to None/null here.
-                roc_auc = {
-                    class_names[i]: (float(score) if not np.isnan(score) else None)
-                    for i, score in enumerate(auc_scores)
-                }
-            except ValueError as e:
-                logger.warning("[%s] Could not compute ROC AUC (likely a class missing from the test split): %s", m.key, e)
+            # One-vs-rest AUC needs at least 2 classes to mean anything — with
+            # only 1 (e.g. a freshly admin-added classification measurement
+            # that hasn't gotten its second class yet), probs_arr has a single
+            # column and sklearn's binary-target code path kicks in instead of
+            # its multiclass one, returning a bare NaN *scalar* rather than a
+            # per-class array; enumerate()-ing that scalar is exactly the
+            # 'float' object is not iterable crash this guard prevents.
+            if len(class_names) >= 2:
+                try:
+                    auc_scores = roc_auc_score(
+                        labels_arr, probs_arr, multi_class="ovr", average=None, labels=list(range(len(class_names)))
+                    )
+                    # A class with only one label present in this test split (0 or
+                    # all support) makes its one-vs-rest AUC undefined — sklearn
+                    # returns NaN for that entry (with an UndefinedMetricWarning)
+                    # rather than raising, unlike the all-classes-missing case
+                    # below. NaN must not reach json.dumps: Python serializes it
+                    # as the bare token `NaN`, which PostgREST rejects as invalid
+                    # JSON (opaque HTTP 400), so map it to None/null here.
+                    roc_auc = {
+                        class_names[i]: (float(score) if not np.isnan(score) else None)
+                        for i, score in enumerate(auc_scores)
+                    }
+                except ValueError as e:
+                    logger.warning("[%s] Could not compute ROC AUC (likely a class missing from the test split): %s", m.key, e)
 
             cm_path = None
             if m is primary:
