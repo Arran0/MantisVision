@@ -15,6 +15,7 @@ const IMAGES_BUCKET = "training-images";
 const MASKS_BUCKET = "training-masks";
 const PAGE_SIZE = 10;
 const SIGNED_URL_TTL_S = 60 * 5;
+const MAX_BULK_FILES = 100;
 
 function extensionFor(file: File): string {
   const fromName = file.name.split(".").pop();
@@ -76,9 +77,16 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   const formData = await request.formData();
-  const file = formData.get("file");
-  if (!(file instanceof File) || !file.type.startsWith("image/")) {
-    return NextResponse.json({ error: "Missing or invalid 'file' — must be an image." }, { status: 400 });
+  const files = formData.getAll("files").filter((f): f is File => f instanceof File);
+  if (files.length === 0) {
+    return NextResponse.json({ error: "Missing 'files' — must include at least one image." }, { status: 400 });
+  }
+  if (files.length > MAX_BULK_FILES) {
+    return NextResponse.json({ error: `Too many files — max ${MAX_BULK_FILES} per upload.` }, { status: 400 });
+  }
+  const nonImage = files.find((f) => !f.type.startsWith("image/"));
+  if (nonImage) {
+    return NextResponse.json({ error: `'${nonImage.name}' is not an image.` }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -105,65 +113,78 @@ export async function POST(request: NextRequest) {
 
   // Upload any segmentation mask files (submitted as `mask:<measurementKey>`)
   // to the training-masks bucket, then store the resulting path as that
-  // measurement's value.
-  for (const measurement of schema.measurements) {
-    if (measurement.type !== "segmentation") continue;
-    if (!measurementApplies(measurement, measurements)) continue;
-    const maskFile = formData.get(`mask:${measurement.key}`);
-    if (!(maskFile instanceof File)) continue;
-    const maskPath = `${measurement.key}/${crypto.randomUUID()}.${extensionFor(maskFile)}`;
-    const { error: maskUploadError } = await admin.storage
-      .from(MASKS_BUCKET)
-      .upload(maskPath, await maskFile.arrayBuffer(), { contentType: maskFile.type });
-    if (maskUploadError) {
-      return NextResponse.json({ error: `Mask upload failed: ${maskUploadError.message}` }, { status: 502 });
+  // measurement's value. A mask is specific to a single image's pixels, so
+  // it's only accepted (and only sent by the client) when uploading exactly
+  // one photo.
+  if (files.length === 1) {
+    for (const measurement of schema.measurements) {
+      if (measurement.type !== "segmentation") continue;
+      if (!measurementApplies(measurement, measurements)) continue;
+      const maskFile = formData.get(`mask:${measurement.key}`);
+      if (!(maskFile instanceof File)) continue;
+      const maskPath = `${measurement.key}/${crypto.randomUUID()}.${extensionFor(maskFile)}`;
+      const { error: maskUploadError } = await admin.storage
+        .from(MASKS_BUCKET)
+        .upload(maskPath, await maskFile.arrayBuffer(), { contentType: maskFile.type });
+      if (maskUploadError) {
+        return NextResponse.json({ error: `Mask upload failed: ${maskUploadError.message}` }, { status: 502 });
+      }
+      measurements[measurement.key] = maskPath;
     }
-    measurements[measurement.key] = maskPath;
   }
 
   const primary = getPrimaryClassification(schema);
   const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
   const isBackground = !!primary && primaryValue === primary.background_class;
+  const notes = stringOrNull(formData.get("notes"));
 
-  const storagePath = `${primaryValue ?? "uncategorized"}/${crypto.randomUUID()}.${extensionFor(file)}`;
+  // The labels (measurements/notes) are shared across the whole batch — each
+  // file just gets its own storage object and its own `training_images` row.
+  // One file failing (e.g. a storage hiccup) doesn't stop the rest.
+  const results: { file: string; id?: string; error?: string }[] = [];
+  for (const file of files) {
+    const storagePath = `${primaryValue ?? "uncategorized"}/${crypto.randomUUID()}.${extensionFor(file)}`;
 
-  const { error: uploadError } = await admin.storage
-    .from(IMAGES_BUCKET)
-    .upload(storagePath, await file.arrayBuffer(), { contentType: file.type });
+    const { error: uploadError } = await admin.storage
+      .from(IMAGES_BUCKET)
+      .upload(storagePath, await file.arrayBuffer(), { contentType: file.type });
 
-  if (uploadError) {
-    return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 502 });
+    if (uploadError) {
+      results.push({ file: file.name, error: `Upload failed: ${uploadError.message}` });
+      continue;
+    }
+
+    const { data: row, error: insertError } = await admin
+      .from("training_images")
+      .insert({
+        created_by: auth.context.userId,
+        storage_path: storagePath,
+        measurements,
+        condition: measurementString(measurements, "health_status", "condition"),
+        subtype: measurementString(measurements, "disease", "disease_subtype"),
+        health_score: measurementNumber(measurements, "health_score"),
+        dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
+        decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
+        is_background: isBackground,
+        species: measurementString(measurements, "species"),
+        colour: measurementString(measurements, "colour"),
+        notes,
+      })
+      .select()
+      .single();
+
+    if (insertError || !row) {
+      // Don't leave an orphaned object in storage if the DB insert failed.
+      await admin.storage.from(IMAGES_BUCKET).remove([storagePath]);
+      results.push({ file: file.name, error: `Failed to save the label: ${insertError?.message ?? "unknown error"}` });
+      continue;
+    }
+
+    results.push({ file: file.name, id: row.id });
   }
 
-  const { data: row, error: insertError } = await admin
-    .from("training_images")
-    .insert({
-      created_by: auth.context.userId,
-      storage_path: storagePath,
-      measurements,
-      condition: measurementString(measurements, "health_status", "condition"),
-      subtype: measurementString(measurements, "disease", "disease_subtype"),
-      health_score: measurementNumber(measurements, "health_score"),
-      dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
-      decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
-      is_background: isBackground,
-      species: measurementString(measurements, "species"),
-      colour: measurementString(measurements, "colour"),
-      notes: stringOrNull(formData.get("notes")),
-    })
-    .select()
-    .single();
-
-  if (insertError || !row) {
-    // Don't leave an orphaned object in storage if the DB insert failed.
-    await admin.storage.from(IMAGES_BUCKET).remove([storagePath]);
-    return NextResponse.json(
-      { error: `Failed to save the label: ${insertError?.message ?? "unknown error"}` },
-      { status: 502 }
-    );
-  }
-
-  return NextResponse.json({ id: row.id }, { status: 201 });
+  const allFailed = results.every((r) => r.error);
+  return NextResponse.json({ results }, { status: allFailed ? 502 : 201 });
 }
 
 export async function GET(request: NextRequest) {
