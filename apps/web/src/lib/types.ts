@@ -25,6 +25,9 @@ export interface TrainingImage {
   measurements: Record<string, string | number>;
   notes: string | null;
   status: string;
+  // Admin-chosen train/validation/test pin for the retrain split. null means
+  // "assign automatically" (the retrain job's random ratio-based split).
+  split: "train" | "validation" | "test" | null;
   thumbnailUrl: string | null;
 }
 

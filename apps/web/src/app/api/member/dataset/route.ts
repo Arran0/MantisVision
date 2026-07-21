@@ -16,6 +16,64 @@ const MASKS_BUCKET = "training-masks";
 const PAGE_SIZE = 10;
 const SIGNED_URL_TTL_S = 60 * 5;
 const MAX_BULK_FILES = 100;
+const DATASET_COLUMNS = "id, created_at, created_by, species, colour, measurements, notes, status, storage_path, split";
+const SPLIT_VALUES = new Set(["train", "validation", "test"]);
+
+type DatasetRow = {
+  id: string;
+  created_at: string;
+  created_by: string | null;
+  species: string | null;
+  colour: string | null;
+  measurements: Record<string, string | number> | null;
+  notes: string | null;
+  status: string;
+  storage_path: string;
+  split: "train" | "validation" | "test" | null;
+};
+
+// A filter clause set built by the Dataset page's filter panel and sent as
+// one JSON-encoded `filters` query param (rather than several individually
+// named params) since it's an open-ended, schema-driven shape: one entry per
+// classification measurement's selected classes, one per regression
+// measurement's [min, max], plus an optional split selection.
+type DatasetFilterQuery = {
+  classValues?: Record<string, string[]>;
+  ranges?: Record<string, { min?: number; max?: number }>;
+  splits?: string[]; // "train" | "validation" | "test" | "auto"
+};
+
+function parseFilters(raw: string | null): DatasetFilterQuery | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    return parsed as DatasetFilterQuery;
+  } catch {
+    return null;
+  }
+}
+
+function rowMatchesFilters(row: DatasetRow, filters: DatasetFilterQuery): boolean {
+  const measurements = row.measurements ?? {};
+  for (const [key, values] of Object.entries(filters.classValues ?? {})) {
+    if (!values || values.length === 0) continue;
+    const value = measurements[key];
+    if (typeof value !== "string" || !values.includes(value)) return false;
+  }
+  for (const [key, range] of Object.entries(filters.ranges ?? {})) {
+    if (range.min === undefined && range.max === undefined) continue;
+    const value = measurements[key];
+    if (typeof value !== "number") return false;
+    if (range.min !== undefined && value < range.min) return false;
+    if (range.max !== undefined && value > range.max) return false;
+  }
+  if (filters.splits && filters.splits.length > 0) {
+    const splitLabel = row.split ?? "auto";
+    if (!filters.splits.includes(splitLabel)) return false;
+  }
+  return true;
+}
 
 function extensionFor(file: File): string {
   const fromName = file.name.split(".").pop();
@@ -192,28 +250,46 @@ export async function GET(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") ?? "1") || 1);
-  const from = (page - 1) * PAGE_SIZE;
-  const to = from + PAGE_SIZE - 1;
+  const filters = parseFilters(request.nextUrl.searchParams.get("filters"));
 
   const admin = createAdminClient();
-  const {
-    data: rows,
-    error,
-    count,
-  } = await admin
-    .from("training_images")
-    .select("id, created_at, created_by, species, colour, measurements, notes, status, storage_path", {
-      count: "exact",
-    })
-    .order("created_at", { ascending: false })
-    .range(from, to);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 502 });
+  let rows: DatasetRow[];
+  let total: number;
+
+  if (filters) {
+    // Filtering on values nested inside the `measurements` jsonb column
+    // (and, for a range, needing a numeric comparison) doesn't push down
+    // cleanly through a single PostgREST query for an open-ended,
+    // schema-driven filter set, so fetch the (still modest-sized) full
+    // dataset and filter/paginate in memory instead.
+    const { data, error } = await admin
+      .from("training_images")
+      .select(DATASET_COLUMNS)
+      .order("created_at", { ascending: false });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 502 });
+    }
+    const matched = ((data as DatasetRow[] | null) ?? []).filter((row) => rowMatchesFilters(row, filters));
+    total = matched.length;
+    rows = matched.slice((page - 1) * PAGE_SIZE, (page - 1) * PAGE_SIZE + PAGE_SIZE);
+  } else {
+    const from = (page - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const {
+      data,
+      error,
+      count,
+    } = await admin.from("training_images").select(DATASET_COLUMNS, { count: "exact" }).order("created_at", { ascending: false }).range(from, to);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 502 });
+    }
+    rows = (data as DatasetRow[] | null) ?? [];
+    total = count ?? 0;
   }
 
   const images: TrainingImage[] = await Promise.all(
-    (rows ?? []).map(async (row) => {
+    rows.map(async (row) => {
       const { data: signed } = await admin.storage
         .from(IMAGES_BUCKET)
         .createSignedUrl(row.storage_path, SIGNED_URL_TTL_S);
@@ -226,12 +302,12 @@ export async function GET(request: NextRequest) {
         measurements: (row.measurements as Record<string, string | number>) ?? {},
         notes: row.notes,
         status: row.status,
+        split: row.split ?? null,
         thumbnailUrl: signed?.signedUrl ?? null,
       };
     })
   );
 
-  const total = count ?? 0;
   const hasMore = page * PAGE_SIZE < total;
 
   return NextResponse.json({ images, page, pageSize: PAGE_SIZE, total, hasMore });
@@ -259,6 +335,18 @@ export async function PATCH(request: NextRequest) {
   }
   const measurements = validated.values;
 
+  // `split` pins this image to a specific retrain split (train/validation/
+  // test); anything else — omitted, null, or the sentinel "auto" — clears
+  // the pin back to "assign automatically" (ml/scripts/split_dataset.py's
+  // random ratio-based split).
+  let split: "train" | "validation" | "test" | null = null;
+  if (body?.split !== undefined && body?.split !== null && body?.split !== "auto") {
+    if (typeof body.split !== "string" || !SPLIT_VALUES.has(body.split)) {
+      return NextResponse.json({ error: "'split' must be one of train, validation, test, or auto." }, { status: 400 });
+    }
+    split = body.split as "train" | "validation" | "test";
+  }
+
   const primary = getPrimaryClassification(schema);
   const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
   const isBackground = !!primary && primaryValue === primary.background_class;
@@ -276,9 +364,10 @@ export async function PATCH(request: NextRequest) {
       species: measurementString(measurements, "species"),
       colour: measurementString(measurements, "colour"),
       notes: stringOrNull(body?.notes),
+      split,
     })
     .eq("id", id)
-    .select("id, species, colour, measurements, notes")
+    .select("id, species, colour, measurements, notes, split")
     .single();
 
   if (updateError || !row) {
@@ -294,5 +383,6 @@ export async function PATCH(request: NextRequest) {
     colour: row.colour,
     measurements: (row.measurements as Record<string, string | number>) ?? {},
     notes: row.notes,
+    split: row.split ?? null,
   });
 }
