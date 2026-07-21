@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEFAULT_SCHEMA, measurementApplies, type SchemaDoc } from "@/lib/schema";
 import { AdminButton, AdminCard, AdminField, AdminInput, AdminSelect, AdminTextarea, sectionHeadingClass } from "@/components/admin/ui";
 
@@ -54,11 +54,13 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   // appear here with no code change. Species is just another classification
   // measurement in `schema.measurements` — no special-casing needed for it.
   const [schema, setSchema] = useState<SchemaDoc>(DEFAULT_SCHEMA);
-  // `file` is what actually gets uploaded (compressed once ready); `previewUrl`
-  // is shown immediately from the raw picked file so there's no wait before
-  // the admin sees what they selected.
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // `files` are what actually get uploaded (compressed once ready); `previews`
+  // are shown immediately from the raw picked files so there's no wait before
+  // the admin sees what they selected. The labels below (classValues /
+  // numberValues / notes) are shared across every file in `files` — bulk
+  // upload applies one set of labels to the whole batch.
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<{ url: string; name: string }[]>([]);
   const [preparing, setPreparing] = useState(false);
 
   // One value per measurement, keyed by measurement key. Classification ->
@@ -100,31 +102,49 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Revokes the previous preview URL whenever it's replaced, and on unmount.
+  // Tracks the live preview URLs so they can be revoked on unmount without
+  // re-running (and mis-revoking still-shown URLs) on every add/remove.
+  const previewsRef = useRef(previews);
+  useEffect(() => {
+    previewsRef.current = previews;
+  }, [previews]);
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      for (const p of previewsRef.current) URL.revokeObjectURL(p.url);
     };
-  }, [previewUrl]);
+  }, []);
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const picked = event.target.files?.[0] ?? null;
-    event.target.value = ""; // allow re-selecting the same file
-    if (!picked) return;
+    const picked = Array.from(event.target.files ?? []);
+    event.target.value = ""; // allow re-selecting the same file(s)
+    if (picked.length === 0) return;
 
-    setPreviewUrl(URL.createObjectURL(picked));
-    setFile(picked);
+    // Replaces any previous selection (this isn't an "append" — picking again
+    // starts a fresh batch), so revoke the outgoing preview URLs up front.
+    for (const p of previews) URL.revokeObjectURL(p.url);
+    setPreviews(picked.map((f) => ({ url: URL.createObjectURL(f), name: f.name })));
+    setFiles(picked);
     setPreparing(true);
     try {
-      setFile(await prepareForUpload(picked));
+      setFiles(await Promise.all(picked.map(prepareForUpload)));
     } finally {
       setPreparing(false);
     }
   }
 
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setPreviews((prev) => {
+      const removed = prev[index];
+      if (removed) URL.revokeObjectURL(removed.url);
+      return prev.filter((_, i) => i !== index);
+    });
+  }
+
   function resetForm() {
-    setFile(null);
-    setPreviewUrl(null);
+    for (const p of previews) URL.revokeObjectURL(p.url);
+    setFiles([]);
+    setPreviews([]);
     setNotes("");
     setNumberValues({});
     setMaskFiles({});
@@ -132,12 +152,12 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!file) {
-      setError("Choose a photo first.");
+    if (files.length === 0) {
+      setError("Choose at least one photo first.");
       return;
     }
     if (preparing) {
-      setError("Still preparing the photo — try again in a moment.");
+      setError("Still preparing the photo(s) — try again in a moment.");
       return;
     }
     setSubmitting(true);
@@ -160,23 +180,42 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
     }
 
     const formData = new FormData();
-    formData.append("file", file);
+    for (const f of files) formData.append("files", f);
     formData.append("measurements", JSON.stringify(measurements));
-    for (const m of schema.measurements) {
-      if (m.type !== "segmentation" || !measurementApplies(m, classValues)) continue;
-      const maskFile = maskFiles[m.key];
-      if (maskFile) formData.append(`mask:${m.key}`, maskFile);
+    // A segmentation mask is specific to a single image's pixels, so it only
+    // makes sense — and is only offered in the UI below — when exactly one
+    // photo is selected.
+    if (files.length === 1) {
+      for (const m of schema.measurements) {
+        if (m.type !== "segmentation" || !measurementApplies(m, classValues)) continue;
+        const maskFile = maskFiles[m.key];
+        if (maskFile) formData.append(`mask:${m.key}`, maskFile);
+      }
     }
     formData.append("notes", notes);
 
     try {
       const response = await fetch("/api/member/dataset", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);
-      if (!response.ok) {
+      // A per-file failure (e.g. one bad upload in a batch) still comes back
+      // with `results` and a non-2xx status; only throw for errors that never
+      // got to per-file processing (auth, invalid 'measurements', ...).
+      if (!response.ok && !payload?.results) {
         throw new Error(payload?.error ?? `Upload failed (HTTP ${response.status}).`);
       }
-      resetForm();
-      onUploaded();
+      const results = (payload?.results ?? []) as { file: string; id?: string; error?: string }[];
+      const failed = results.filter((r) => r.error);
+      if (failed.length > 0) {
+        setError(
+          failed.length === results.length
+            ? `All uploads failed: ${failed[0]?.error}`
+            : `${failed.length} of ${results.length} photo(s) failed: ${failed.map((f) => `${f.file} (${f.error})`).join("; ")}`
+        );
+      }
+      if (failed.length < results.length) {
+        resetForm();
+        onUploaded();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -187,29 +226,43 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
   return (
     <AdminCard className="p-5">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <h2 className={sectionHeadingClass}>Label a new photo</h2>
+        <h2 className={sectionHeadingClass}>Label new photos</h2>
 
-        <AdminField label="Photo">
-          <div className="flex items-center gap-3">
-            {previewUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={previewUrl}
-                alt="Selected photo preview"
-                className="h-20 w-20 flex-shrink-0 border border-zinc-200 object-cover"
-              />
-            ) : (
-              <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center border border-dashed border-zinc-300 text-[10px] text-zinc-400">
-                No photo
+        <AdminField label="Photos">
+          <div className="flex flex-col gap-3">
+            {previews.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {previews.map((p, i) => (
+                  <div key={p.url} className="group relative h-20 w-20 flex-shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.url} alt={p.name} className="h-20 w-20 border border-zinc-200 object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      aria-label={`Remove ${p.name}`}
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-zinc-300 bg-white text-xs text-zinc-600 opacity-0 transition-opacity hover:bg-zinc-100 group-hover:opacity-100"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
-            <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
               <label className="inline-flex w-fit cursor-pointer items-center rounded-sm border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100">
-                {previewUrl ? "Choose a different photo" : "Choose photo"}
-                <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+                {previews.length > 0 ? "Choose different photos" : "Choose photos"}
+                <input type="file" accept="image/*" multiple onChange={handleFileChange} className="hidden" />
               </label>
-              {preparing && <span className="text-xs text-zinc-500">Preparing image…</span>}
+              {previews.length > 0 && (
+                <span className="text-xs text-zinc-500">
+                  {previews.length} photo{previews.length === 1 ? "" : "s"} selected
+                </span>
+              )}
+              {preparing && <span className="text-xs text-zinc-500">Preparing image{previews.length === 1 ? "" : "s"}…</span>}
             </div>
+            {previews.length > 1 && (
+              <p className="text-xs text-zinc-500">The labels below will be applied to all {previews.length} photos.</p>
+            )}
           </div>
         </AdminField>
 
@@ -255,7 +308,9 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
             );
           }
 
-          // segmentation
+          // segmentation — a mask is specific to one image's pixels, so it's
+          // only offered when uploading a single photo.
+          if (files.length > 1) return null;
           return (
             <AdminField key={m.key} label={`${m.label} mask (optional)`}>
               <input
@@ -275,7 +330,11 @@ export function DatasetUploadForm({ onUploaded }: { onUploaded: () => void }) {
         {error && <p className="text-sm text-rose-600">{error}</p>}
 
         <AdminButton type="submit" disabled={submitting || preparing} className="self-start">
-          {submitting ? "Uploading…" : "Add to dataset"}
+          {submitting
+            ? "Uploading…"
+            : files.length > 1
+              ? `Add ${files.length} photos to dataset`
+              : "Add to dataset"}
         </AdminButton>
       </form>
     </AdminCard>
