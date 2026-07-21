@@ -396,9 +396,14 @@ TensorFlow Lite or CoreML for native mobile builds later.
   Also set `NEXT_PUBLIC_SITE_URL` (e.g. `https://mantis-vision.vercel.app`)
   — without it, admin team invite links fall back to the request origin and
   can end up pointing at `localhost:3000` if an invite is sent from a local
-  dev server. This must also be added to Supabase's Authentication → URL
-  Configuration → Redirect URLs (and set as the Site URL there), or Supabase
-  will ignore the app's `redirectTo` and use its own default instead.
+  dev server. This should also be added to Supabase's Authentication → URL
+  Configuration → Redirect URLs (and set as the Site URL there) — if it's
+  missing from that allow-list, Supabase ignores the app's `redirectTo` and
+  sends invitees to the Site URL instead. As a safety net for exactly that
+  misconfiguration, `AuthCallbackRedirect` (mounted in the root layout)
+  detects an auth token/error landing in the hash of any page and forwards it
+  to `/member/password-reset`, so invite links still work even if the
+  Supabase-side allow-list wasn't updated.
 - **ML inference API (`ml`)** → Vercel's Node/edge runtime is not a fit for a
   PyTorch service. Deploy `ml/src/api` as its own service instead — a small
   container on Fly.io/Render/Railway, or a GPU-less CPU box is fine for
