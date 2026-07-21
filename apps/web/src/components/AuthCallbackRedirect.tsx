@@ -14,13 +14,19 @@ export function AuthCallbackRedirect() {
     if (window.location.pathname === "/member/password-reset") return;
 
     const hash = window.location.hash.replace(/^#/, "");
-    if (!hash) return;
-
-    const params = new URLSearchParams(hash);
-    const isAuthCallback =
-      params.has("access_token") || params.has("error_description") || params.has("token_hash");
-    if (isAuthCallback) {
+    const hashParams = new URLSearchParams(hash);
+    const isHashCallback =
+      hashParams.has("access_token") || hashParams.has("error_description") || hashParams.has("token_hash");
+    if (isHashCallback) {
       window.location.replace(`/member/password-reset#${hash}`);
+      return;
+    }
+
+    // Same fallback, but for the PKCE flow (?code=...) instead of the
+    // implicit flow's hash tokens, in case that's ever enabled project-side.
+    const query = new URLSearchParams(window.location.search);
+    if (query.has("code") || query.has("error_description")) {
+      window.location.replace(`/member/password-reset${window.location.search}`);
     }
   }, []);
 
