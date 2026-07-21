@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { AuthCallbackRedirect } from "@/components/AuthCallbackRedirect";
 import { Background } from "@/components/Background";
 import { Logo } from "@/components/Logo";
 import { TopBarAuthButton } from "@/components/TopBarAuthButton";
@@ -48,6 +49,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" className={poppins.variable}>
       <body className="min-h-screen font-sans text-slate-900 antialiased">
         <ServiceWorkerRegister />
+        <AuthCallbackRedirect />
         <Background />
 
         {/* Thick white top bar: logo sits before the title to save space. */}
