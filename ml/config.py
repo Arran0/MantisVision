@@ -173,6 +173,8 @@ def schema_from_dict(doc: dict) -> Schema:
         return []
 
     def _measurement(d: dict) -> MeasurementDef:
+        if not isinstance(d, dict):
+            raise ValueError(f"Each entry in schema 'measurements' must be an object, got {type(d).__name__}.")
         classes_raw = d.get("classes", [])
         ranges_raw = d.get("ranges", [])
         seg_classes_raw = d.get("seg_classes", [])
@@ -191,10 +193,16 @@ def schema_from_dict(doc: dict) -> Schema:
             seg_classes=[_seg_class(c) for c in (seg_classes_raw if isinstance(seg_classes_raw, list) else [])],
         )
 
+    measurements_raw = doc.get("measurements")
+    if not isinstance(measurements_raw, list):
+        raise ValueError(
+            f"Schema document's 'measurements' field must be a list, got {type(measurements_raw).__name__}."
+        )
+
     return Schema(
         health_moderate_min=float(doc.get("health_moderate_min", DEFAULT_HEALTH_MODERATE_MIN)),
         health_healthy_min=float(doc.get("health_healthy_min", DEFAULT_HEALTH_HEALTHY_MIN)),
-        measurements=[_measurement(m) for m in doc["measurements"]],
+        measurements=[_measurement(m) for m in measurements_raw],
     )
 
 
