@@ -145,32 +145,40 @@ def evaluate(checkpoint_path: Path | None = None, cfg: Config | None = None) -> 
                 name: float(cm[i, i] / cm[i].sum()) if cm[i].sum() else 0.0 for i, name in enumerate(class_names)
             }
 
+            # Per-class one-vs-rest ROC AUC, computed one class at a time by
+            # binarizing y_true against that class rather than via a single
+            # roc_auc_score(multi_class="ovr", average=None) call.
+            #
+            # That single-call form is unusable here because its return SHAPE
+            # depends on the data, not just the schema: with a small/sparse
+            # labeled set (the norm right after an admin adds a measurement and
+            # labels a handful of images) a split routinely contains only one
+            # of a measurement's classes, and sklearn then returns a bare NaN
+            # *scalar* for the 2-declared-classes case (but a NaN *array* for
+            # 3+). Iterating that scalar is the 'float' object is not iterable
+            # crash. Binarizing per class sidesteps sklearn's shape-guessing
+            # entirely: every call gets a clean 1-D y_true and a 1-D score
+            # column, so the result is always a plain float we control.
+            #
+            # A class's OvR AUC is undefined unless BOTH that class and the
+            # "rest" appear in y_true; those cases (and any residual sklearn
+            # ValueError) map to None. None (not NaN) matters downstream:
+            # json.dumps emits NaN as the bare token `NaN`, which PostgREST
+            # rejects as invalid JSON (an opaque HTTP 400 when reporting
+            # results back to model_runs).
             roc_auc: dict[str, float | None] = {}
-            # One-vs-rest AUC needs at least 2 classes to mean anything — with
-            # only 1 (e.g. a freshly admin-added classification measurement
-            # that hasn't gotten its second class yet), probs_arr has a single
-            # column and sklearn's binary-target code path kicks in instead of
-            # its multiclass one, returning a bare NaN *scalar* rather than a
-            # per-class array; enumerate()-ing that scalar is exactly the
-            # 'float' object is not iterable crash this guard prevents.
-            if len(class_names) >= 2:
+            for i, name in enumerate(class_names):
+                y_true_binary = (labels_arr == i).astype(int)
+                # Needs both a positive and a negative present to be defined.
+                if y_true_binary.min() == y_true_binary.max():
+                    roc_auc[name] = None
+                    continue
                 try:
-                    auc_scores = roc_auc_score(
-                        labels_arr, probs_arr, multi_class="ovr", average=None, labels=list(range(len(class_names)))
-                    )
-                    # A class with only one label present in this test split (0 or
-                    # all support) makes its one-vs-rest AUC undefined — sklearn
-                    # returns NaN for that entry (with an UndefinedMetricWarning)
-                    # rather than raising, unlike the all-classes-missing case
-                    # below. NaN must not reach json.dumps: Python serializes it
-                    # as the bare token `NaN`, which PostgREST rejects as invalid
-                    # JSON (opaque HTTP 400), so map it to None/null here.
-                    roc_auc = {
-                        class_names[i]: (float(score) if not np.isnan(score) else None)
-                        for i, score in enumerate(auc_scores)
-                    }
-                except ValueError as e:
-                    logger.warning("[%s] Could not compute ROC AUC (likely a class missing from the test split): %s", m.key, e)
+                    score = roc_auc_score(y_true_binary, probs_arr[:, i])
+                    roc_auc[name] = float(score) if not np.isnan(score) else None
+                except (ValueError, IndexError) as e:
+                    logger.warning("[%s] Could not compute ROC AUC for class %r: %s", m.key, name, e)
+                    roc_auc[name] = None
 
             cm_path = None
             if m is primary:
