@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/supabase/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getActiveSchema } from "@/lib/serverSchema";
+import { getActiveSchema, invalidateActiveSchemaCache } from "@/lib/serverSchema";
 import { validateSchema, type SchemaDoc } from "@/lib/schema";
 
 // GET  -> the active (most recent) measurement schema document.
@@ -44,5 +44,6 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 502 });
   }
 
+  invalidateActiveSchemaCache();
   return NextResponse.json({ ok: true, schema: doc });
 }
