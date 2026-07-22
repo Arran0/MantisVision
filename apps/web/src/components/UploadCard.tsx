@@ -9,7 +9,39 @@ import { ResultCard } from "@/components/ResultCard";
 // cold-starting inference host) is waited out rather than cut off here.
 const REQUEST_TIMEOUT_MS = 62_000;
 
+// The model resizes to a fixed 224x224 input anyway, so there's no benefit to
+// uploading (and proxying through two hops) a full camera-resolution photo.
+// This cap keeps plenty of headroom above that for the Grad-CAM overlay
+// while cutting multi-MB phone photos down to a few hundred KB.
+const MAX_UPLOAD_DIMENSION = 1024;
+const UPLOAD_JPEG_QUALITY = 0.85;
+
 type Selection = { blob: Blob; filename: string; url: string };
+
+// Downscales + re-encodes as JPEG so large camera-roll photos don't dominate
+// upload time. No-ops (aside from re-encoding) on images already within bounds.
+async function resizeForUpload(blob: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return blob;
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    const resized = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", UPLOAD_JPEG_QUALITY)
+    );
+    return resized ?? blob;
+  } finally {
+    bitmap.close();
+  }
+}
 
 export function UploadCard() {
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -97,15 +129,20 @@ export function UploadCard() {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return;
 
+    const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     stopCamera();
-    canvas.toBlob((blob) => blob && chooseImage(blob, "capture.jpg"), "image/jpeg", 0.92);
+    canvas.toBlob(
+      (blob) => blob && chooseImage(blob, "capture.jpg"),
+      "image/jpeg",
+      UPLOAD_JPEG_QUALITY
+    );
   }
 
   async function analyze() {
@@ -157,11 +194,12 @@ export function UploadCard() {
     }
   }
 
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file) return;
-    chooseImage(file, file.name);
     event.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    const resized = await resizeForUpload(file);
+    chooseImage(resized, file.name);
   }
 
   return (
