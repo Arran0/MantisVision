@@ -131,20 +131,14 @@ re-label anything, or to commit images to git at all):
 python scripts/kaggle_sync.py download --dataset <your-kaggle-username>/mantis-vision-kappaphycus-health
 ```
 
-**Training in Google Colab instead of a local machine?** Use
-[`docs/colab/MantisVision_Training.ipynb`](./colab/MantisVision_Training.ipynb)
-— open it at colab.research.google.com (File → Upload notebook, or open
-directly from GitHub), set the runtime to GPU, and run the cells top to
-bottom. It clones this repo, installs dependencies, lets you upload a zip of
-your `train/validation/test` folders directly through a browser file picker
-(no Kaggle account needed), trains, evaluates, and lets you download the
-resulting checkpoint before the Colab session ends (Colab runtimes are
-ephemeral — nothing persists after you disconnect unless you download it,
-which means you'll need to re-upload the dataset zip each new session).
-
-Kaggle (`scripts/kaggle_sync.py`) is still there as an alternative once the
-dataset grows large enough that re-uploading a zip every Colab session gets
-tedious — it's not required for the notebook above.
+**No GPU locally?** Train on a rented GPU (Kaggle Notebooks, Google Colab, or
+any cloud GPU box): pull the dataset with `scripts/kaggle_sync.py download`,
+`pip install -r requirements.txt`, then run `python -m src.train` and
+`python -m src.evaluate` exactly as below. Because dataset ground truth is the
+schema-driven `annotations.jsonl` manifest (not class folders), sync the
+dataset through Kaggle rather than hand-assembling folders. Remember cloud
+runtimes are ephemeral — download `checkpoints/best_model.pt` before the
+session ends.
 
 ### 2.4 Validate the dataset
 
