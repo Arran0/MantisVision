@@ -5,7 +5,7 @@ Seaweed"**: photograph a specimen and get species identification, health
 assessment, disease/predator detection, damage estimation, and treatment
 recommendations — with a Grad-CAM heatmap showing what the model looked at.
 
-**Current focus:** health assessment for *Kappaphycus alvarezii*. But the
+**Current focus:** health assessment for *a few species of seaweeds*. But the
 system is **schema-driven, not hardcoded** — a single admin-editable
 *measurement schema* defines every per-image measurement the model predicts,
 and the model grows one head per measurement automatically. Adding species ID,
@@ -93,20 +93,6 @@ MantisVision/
 | Dataset storage | Kaggle Datasets (versioned; images stay out of git) |
 | CI / automation | GitHub Actions (retrain workflow, Hugging Face Space deploy) |
 | Hosting | Vercel (web) · Hugging Face Spaces or Render (ML service) |
-
-## Screenshots
-
-> Screenshots are not committed to the repo yet. Drop images into
-> `docs/screenshots/` and replace the placeholders below before handoff — the
-> key screens to capture are listed so a reviewer knows what each should show.
-
-| Screen | What it shows |
-|---|---|
-| Analyzer (home) | Upload/capture a photo and view the result card with Grad-CAM overlay |
-| Result card | Species, health, confidence, explanation/recommendation, heatmap |
-| Admin · Structure | The measurement-schema editor (add/edit measurements & classes) |
-| Admin · Dataset | Upload + label photos against the active schema |
-| Admin · Retrain | Trigger a retrain, watch progress, review metrics, promote a run |
 
 ## Installation
 
