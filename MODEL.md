@@ -235,23 +235,6 @@ breakdown and confusion matrix** to decide where to collect more data — e.g. i
 `Disease` sits at 81% recall while `Dried` is at 99%, collect more `Disease`
 photos rather than tuning hyperparameters.
 
-### Results template (fill in after a run)
-
-Replace this with the real output of `python -m src.evaluate` for your dataset.
-Do not ship placeholder numbers as if they were measured.
-
-| Class | Precision | Recall | F1 | Support |
-|---|---|---|---|---|
-| Healthy | — | — | — | — |
-| Moderate | — | — | — | — |
-| Low | — | — | — | — |
-| **macro avg** | — | — | — | — |
-| **weighted avg** | — | — | — | — |
-
-- Accuracy: —
-- Dataset size (train/val/test): — / — / —
-- Confusion matrix: `ml/reports/confusion_matrix.png`
-
 ## Explainability (Grad-CAM)
 
 ```bash
