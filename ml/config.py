@@ -15,9 +15,10 @@ species-scoped (see Config.dataset_dir).
 
 health_status (Healthy/Moderate/Low) is a labeled classification the admin
 assigns per image, not a bucket derived from a score. health_moderate_min/
-health_healthy_min are kept only so an older checkpoint that still regresses
-a health_score can be bucketed into the same display level (see
-src/inference/predictor.py's _derive_level).
+health_healthy_min are legacy schema-doc fields with no reader left in this
+codebase (the health_score-bucketing they supported was dropped along with
+the rest of the predictor's flat-field compatibility layer) — kept only so
+an existing stored schema doc that still has them keeps parsing.
 """
 from __future__ import annotations
 
@@ -36,9 +37,9 @@ ML_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONDITION_CLASSES = ["Background", "Healthy", "Disease", "Decay", "Dried"]
 DEFAULT_DISEASE_SUBTYPES = ["IceIce", "Epiphyte", "Bacterial", "Bleaching", "Unknown"]
 
-# Display-level thresholds (see predictor._derive_level): health_score at or
-# above HEALTHY_MIN -> "Healthy"; at or above MODERATE_MIN (but below
-# healthy) -> "Moderate"; otherwise "Low".
+# Legacy display-level thresholds — unused (see the Schema docstring above);
+# kept only as defaults for schema_from_dict when an existing stored doc
+# still carries health_moderate_min/health_healthy_min.
 DEFAULT_HEALTH_MODERATE_MIN: float = 45.0
 DEFAULT_HEALTH_HEALTHY_MIN: float = 75.0
 

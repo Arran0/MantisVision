@@ -271,31 +271,21 @@ Endpoints:
   `species_classes` is the full list of species the loaded schema's "species"
   measurement knows about (not a single "active" one); `measurements` is the
   list of measurement keys the currently-loaded checkpoint's schema defines
-- `POST /predict` → multipart form with a `file` field, returns a legacy flat
-  shape (kept stable for the current PWA) plus a generic, forward-looking
-  `measurements` map — one entry per schema measurement:
+- `POST /predict` → multipart form with a `file` field, returns a fully
+  schema-driven `measurements` map — one entry per schema measurement, no
+  flat/legacy fields:
 
 ```json
 {
-  "species": "Kappaphycus alvarezii",
-  "is_seaweed": true,
-  "condition": "Disease",
-  "health": "Moderate",
-  "health_score": 62.1,
-  "confidence": 0.974,
-  "disease_subtype": "IceIce",
-  "dried_pct": null,
-  "decayed_pct": null,
-  "explanation": "Minor bleaching on branches and early tissue degradation observed.",
-  "recommendation": "Increase water movement. Inspect for grazers and early disease signs.",
-  "gradcam_png_base64": "...",
   "measurements": {
-    "condition": {"type": "classification", "value": "Disease", "confidence": 0.974, "explanation": "...", "recommendation": "...", "coverage": null, "mask_png_base64": null},
-    "disease_subtype": {"type": "classification", "value": "IceIce", "confidence": 0.88, "explanation": null, "recommendation": null, "coverage": null, "mask_png_base64": null},
-    "health_score": {"type": "regression", "value": 62.1, "confidence": null, "explanation": null, "recommendation": null, "coverage": null, "mask_png_base64": null}
+    "seaweed_presence": {"type": "classification", "label": "Seaweed presence", "value": "Yes", "confidence": 0.99, "explanation": "...", "recommendation": "...", "unit": null, "min": null, "max": null, "coverage": null, "seg_colors": null, "mask_png_base64": null, "gradcam_png_base64": "..."},
+    "health_status": {"type": "classification", "label": "Health status", "value": "Moderate", "confidence": 0.974, "explanation": "...", "recommendation": "...", "unit": null, "min": null, "max": null, "coverage": null, "seg_colors": null, "mask_png_base64": null, "gradcam_png_base64": null},
+    "disease": {"type": "classification", "label": "Disease", "value": "IceIce", "confidence": 0.88, "explanation": null, "recommendation": "...", "unit": null, "min": null, "max": null, "coverage": null, "seg_colors": null, "mask_png_base64": null, "gradcam_png_base64": null}
   }
 }
 ```
+
+See [API.md](../API.md) for the full field reference.
 
 - `POST /admin/reload` → hot-swaps the running checkpoint (weights + schema)
   from a `model_url` without restarting the process; requires a
@@ -327,8 +317,9 @@ npm run dev
 ```
 
 Open `http://localhost:3000`, upload a photo, and confirm the result card
-shows species/health/confidence/explanation/recommendation plus the Grad-CAM
-overlay. The app's `/api/predict` route (`src/app/api/predict/route.ts`)
+renders every applicable measurement (presence/health/disease/... with their
+confidence, explanation, recommendation) plus the Grad-CAM overlay. The
+app's `/api/predict` route (`src/app/api/predict/route.ts`)
 proxies the upload to the Python service — the browser never talks to the ML
 API directly.
 

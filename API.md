@@ -50,28 +50,20 @@ Run inference on one image. `multipart/form-data` with a `file` field.
 curl -F "file=@/path/to/photo.jpg" $ML_API_URL/predict
 ```
 
-**Response** (`200`) — legacy flat fields (kept stable for the current PWA)
-plus a generic, forward-looking `measurements` map (one entry per schema
-measurement):
+**Response** (`200`) — fully schema-driven: one entry per measurement the
+active schema defines, in schema order. There are no flat/legacy fields (no
+`species`, `is_seaweed`, `confidence`, ...) — a client renders whichever
+measurements are present, using each entry's own `label`/`type`/`unit`/etc.
+A measurement gated off by `applies_when` (e.g. `health_status` when
+`seaweed_presence` predicted `"No"`) still appears, with `value: null`.
 
 ```json
 {
-  "species": "Kappaphycus alvarezii",
-  "is_seaweed": true,
-  "condition": "Disease",
-  "health": "Moderate",
-  "health_score": 62.1,
-  "confidence": 0.974,
-  "disease_subtype": "IceIce",
-  "dried_pct": null,
-  "decayed_pct": null,
-  "explanation": "Minor bleaching on branches and early tissue degradation observed.",
-  "recommendation": "Increase water movement. Inspect for grazers and early disease signs.",
-  "gradcam_png_base64": "...",
   "measurements": {
-    "condition":      {"type": "classification", "value": "Disease", "confidence": 0.974, "explanation": "...", "recommendation": "...", "coverage": null, "mask_png_base64": null},
-    "disease_subtype":{"type": "classification", "value": "IceIce",  "confidence": 0.88,  "explanation": null,  "recommendation": null, "coverage": null, "mask_png_base64": null},
-    "health_score":   {"type": "regression",     "value": 62.1,      "confidence": null,  "explanation": null,  "recommendation": null, "coverage": null, "mask_png_base64": null}
+    "seaweed_presence": {"type": "classification", "label": "Seaweed presence", "value": "Yes", "confidence": 0.99, "explanation": "...", "recommendation": "...", "unit": null, "min": null, "max": null, "coverage": null, "seg_colors": null, "mask_png_base64": null, "gradcam_png_base64": "..."},
+    "health_status":    {"type": "classification", "label": "Health status",    "value": "Moderate", "confidence": 0.974, "explanation": "...", "recommendation": "...", "unit": null, "min": null, "max": null, "coverage": null, "seg_colors": null, "mask_png_base64": null, "gradcam_png_base64": null},
+    "disease":          {"type": "classification", "label": "Disease",         "value": "IceIce", "confidence": 0.88, "explanation": null, "recommendation": "...", "unit": null, "min": null, "max": null, "coverage": null, "seg_colors": null, "mask_png_base64": null, "gradcam_png_base64": null},
+    "dried":            {"type": "regression",     "label": "Dried",          "value": 12.4, "confidence": null, "explanation": null, "recommendation": null, "unit": "%", "min": 0.0, "max": 100.0, "coverage": null, "seg_colors": null, "mask_png_base64": null, "gradcam_png_base64": null}
   }
 }
 ```
@@ -81,11 +73,15 @@ Each `measurements` entry (`MeasurementResultResponse`):
 | Field | Type | Meaning |
 |---|---|---|
 | `type` | string | `classification` \| `regression` \| `segmentation` |
-| `value` | string \| number \| null | Predicted class name or scalar |
+| `label` | string | Admin-facing display label from the schema |
+| `value` | string \| number \| null | Predicted class name or scalar (`null` if gated off by `applies_when`) |
 | `confidence` | number \| null | Softmax confidence (classification only) |
 | `explanation` / `recommendation` | string \| null | Preset copy for the predicted class/range |
+| `unit` / `min` / `max` | string/number \| null | Regression only — unit label and value bounds for client-side scaling |
 | `coverage` | object \| null | Per-class pixel coverage (segmentation) |
-| `mask_png_base64` | string \| null | Overlay mask PNG (segmentation) |
+| `seg_colors` | object \| null | Per-class hex color, keyed the same as `coverage` (segmentation) |
+| `mask_png_base64` | string \| null | Overlay mask PNG, `""` unless `ENABLE_SEGMENTATION_OVERLAY` (segmentation) |
+| `gradcam_png_base64` | string \| null | Heatmap PNG for the one classification head Grad-CAM ran against (first in schema order), `""` unless `ENABLE_GRADCAM`, `null` for every other measurement |
 
 **Errors:** `400` if the uploaded file is not an image; `503` if no trained
 model is available.
@@ -129,16 +125,19 @@ requires a session, and each handler calls `requireAdmin` /
 
 Browser-facing proxy to the ML service's `/predict`. Accepts the same
 `multipart/form-data` `file` field, forwards it to `${ML_API_URL}/predict`, and
-returns a camelCase-normalized subset for the UI:
+returns the same schema-driven `measurements` map, camelCase-normalized:
 
 ```json
 {
-  "species": "...", "isSeaweed": true, "condition": "...",
-  "health": "...", "healthScore": 62.1, "confidence": 0.974,
-  "diseaseSubtype": "...", "driedPct": null, "decayedPct": null,
-  "explanation": "...", "recommendation": "...", "gradcamPngBase64": "..."
+  "measurements": {
+    "seaweed_presence": {"type": "classification", "label": "Seaweed presence", "value": "Yes", "confidence": 0.99, "explanation": "...", "recommendation": "...", "unit": null, "min": null, "max": null, "coverage": null, "segColors": null, "maskPngBase64": null, "gradcamPngBase64": "..."}
+  }
 }
 ```
+
+Measurement dict keys (`seaweed_presence`, `health_status`, ...) are passed
+through verbatim from the schema — they're admin-defined, not fixed field
+names, so they aren't camelCased.
 
 Tolerates free-tier cold starts (up to ~55s) before returning `502` with a
 readable error. Keeps the ML service address off the browser.

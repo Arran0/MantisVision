@@ -90,14 +90,11 @@ export interface MeasurementDef {
 }
 
 export interface SchemaDoc {
-  // Legacy display-level thresholds, relevant only to a schema whose health
-  // measurement is still a regressed health_score (see
-  // ml/src/inference/predictor.py's _derive_level fallback for a
-  // pre-restructure checkpoint): at or above health_healthy_min ->
-  // "Healthy"; at or above health_moderate_min (but below healthy) ->
-  // "Moderate"; otherwise "Low". The current required schema assigns
-  // health_status directly as a classification instead, so these are
-  // optional and have no admin UI of their own.
+  // Legacy display-level thresholds — no reader left anywhere in this
+  // codebase (the health_score-bucketing they supported was dropped from
+  // ml/src/inference/predictor.py). Kept optional, with no admin UI of
+  // their own, purely so an existing stored schema doc that still carries
+  // them keeps validating.
   health_moderate_min?: number;
   health_healthy_min?: number;
   measurements: MeasurementDef[];

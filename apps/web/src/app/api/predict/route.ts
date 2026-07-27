@@ -57,18 +57,49 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({
-    species: payload.species,
-    isSeaweed: payload.is_seaweed,
-    condition: payload.condition,
-    health: payload.health,
-    healthScore: payload.health_score,
-    confidence: payload.confidence,
-    diseaseSubtype: payload.disease_subtype,
-    driedPct: payload.dried_pct,
-    decayedPct: payload.decayed_pct,
-    explanation: payload.explanation,
-    recommendation: payload.recommendation,
-    gradcamPngBase64: payload.gradcam_png_base64,
-  });
+  // Pass the schema-driven measurements map straight through, camelCasing
+  // each entry's field names (not the measurement keys themselves — those
+  // are admin-defined schema keys, not fixed field names).
+  const rawMeasurements = (payload.measurements ?? {}) as Record<string, UpstreamMeasurement>;
+  const measurements = Object.fromEntries(
+    Object.entries(rawMeasurements).map(([key, m]) => [
+      key,
+      {
+        type: m.type,
+        label: m.label,
+        value: m.value,
+        confidence: m.confidence,
+        explanation: m.explanation,
+        recommendation: m.recommendation,
+        unit: m.unit,
+        min: m.min,
+        max: m.max,
+        coverage: m.coverage,
+        segColors: m.seg_colors,
+        maskPngBase64: m.mask_png_base64,
+        gradcamPngBase64: m.gradcam_png_base64,
+      },
+    ])
+  );
+
+  return NextResponse.json({ measurements });
+}
+
+// Shape of a single entry in the ML API's `measurements` response map
+// (snake_case, as FastAPI serializes it) — see ml/src/api/schemas.py's
+// MeasurementResultResponse.
+interface UpstreamMeasurement {
+  type: string;
+  label: string;
+  value: string | number | null;
+  confidence: number | null;
+  explanation: string | null;
+  recommendation: string | null;
+  unit: string | null;
+  min: number | null;
+  max: number | null;
+  coverage: Record<string, number> | null;
+  seg_colors: Record<string, string> | null;
+  mask_png_base64: string | null;
+  gradcam_png_base64: string | null;
 }

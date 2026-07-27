@@ -1,9 +1,9 @@
 """Unit tests for the schema-driven Predictor: builds a real checkpoint
 (exercising the actual save/load_checkpoint schema round-trip) but swaps in a
 fixed-logits stub model afterwards, so predictions are deterministic and the
-post-processing/gating logic (applies_when suppression, legacy flat-field
-mapping, augmented recommendations, segmentation coverage) can be tested
-precisely without depending on an actually-trained model."""
+post-processing/gating logic (applies_when suppression, augmented
+recommendations, segmentation coverage, Grad-CAM target selection) can be
+tested precisely without depending on an actually-trained model."""
 from __future__ import annotations
 
 import io
@@ -120,16 +120,13 @@ def test_healthy_prediction_masks_disease_subtype_but_keeps_health_score(tmp_pat
 
     result = predictor.predict(_fake_image_bytes())
 
-    assert result.is_seaweed is True
-    assert result.condition == "Healthy"
-    assert result.health == "Healthy"
-    assert result.health_score == 88.0
-    assert result.disease_subtype is None  # masked: applies_when condition==Disease not satisfied
-    assert result.explanation == "Looks great."
-    assert result.recommendation == "Keep monitoring."  # no child note appended (subtype doesn't apply)
+    condition_result = result.measurements["condition"]
+    assert condition_result.value == "Healthy"
+    assert condition_result.label == "Condition"
+    assert condition_result.explanation == "Looks great."
+    assert condition_result.recommendation == "Keep monitoring."  # no child note appended (subtype doesn't apply)
 
-    assert result.measurements["condition"].value == "Healthy"
-    assert result.measurements["disease_subtype"].value is None
+    assert result.measurements["disease_subtype"].value is None  # masked: applies_when condition==Disease not satisfied
     assert result.measurements["health_score"].value == 88.0
 
 
@@ -138,53 +135,20 @@ def test_disease_prediction_surfaces_subtype_and_augments_recommendation(tmp_pat
     predictor = _make_predictor(
         tmp_path, schema,
         class_choice={"condition": "Disease", "disease_subtype": "IceIce"},
-        regression_values={"health_score": 60.0},  # >= health_moderate_min (45), < health_healthy_min (75) -> "Moderate"
+        regression_values={"health_score": 60.0},
         seg_class_choice={"biofouling": 0},
     )
 
     result = predictor.predict(_fake_image_bytes())
 
-    assert result.condition == "Disease"
-    assert result.disease_subtype == "IceIce"
-    assert result.health == "Moderate"
-    assert result.recommendation == "Isolate and confirm. Raise water movement."
+    assert result.measurements["condition"].value == "Disease"
+    assert result.measurements["condition"].recommendation == "Isolate and confirm. Raise water movement."
 
     assert result.measurements["disease_subtype"].value == "IceIce"
     assert result.measurements["disease_subtype"].confidence is not None
 
 
-def test_disease_prediction_low_health_score_derives_low_level(tmp_path):
-    schema = _schema()
-    predictor = _make_predictor(
-        tmp_path, schema,
-        class_choice={"condition": "Disease", "disease_subtype": "Unknown"},
-        regression_values={"health_score": 20.0},  # below health_moderate_min -> "Low"
-        seg_class_choice={"biofouling": 0},
-    )
-
-    result = predictor.predict(_fake_image_bytes())
-    assert result.health == "Low"
-
-
-def test_level_is_purely_score_based_not_special_cased_by_condition_name(tmp_path):
-    """The level derivation used to hardcode "Disease" as the only condition
-    that could ever show "Moderate", and "Healthy" as the only one that could
-    show "Healthy" — regardless of the actual regressed score. It's now
-    purely a function of health_score against the two thresholds, so a
-    "Disease" prediction with a high enough score shows "Healthy" too."""
-    schema = _schema()
-    predictor = _make_predictor(
-        tmp_path, schema,
-        class_choice={"condition": "Disease", "disease_subtype": "Unknown"},
-        regression_values={"health_score": 90.0},  # >= health_healthy_min (75)
-        seg_class_choice={"biofouling": 0},
-    )
-
-    result = predictor.predict(_fake_image_bytes())
-    assert result.health == "Healthy"
-
-
-def test_background_prediction_masks_everything_and_reports_not_seaweed(tmp_path):
+def test_background_prediction_masks_everything(tmp_path):
     schema = _schema()
     predictor = _make_predictor(
         tmp_path, schema,
@@ -195,19 +159,16 @@ def test_background_prediction_masks_everything_and_reports_not_seaweed(tmp_path
 
     result = predictor.predict(_fake_image_bytes())
 
-    assert result.is_seaweed is False
-    assert result.condition == "Background"
-    assert result.health is None
-    assert result.health_score is None  # masked: applies_when condition!=Background not satisfied
-    assert result.disease_subtype is None
-    assert result.explanation == "No subject."
-    assert result.recommendation == "Point at a specimen."
+    condition_result = result.measurements["condition"]
+    assert condition_result.value == "Background"
+    assert condition_result.explanation == "No subject."
+    assert condition_result.recommendation == "Point at a specimen."
 
-    assert result.measurements["health_score"].value is None
+    assert result.measurements["health_score"].value is None  # masked: applies_when condition!=Background not satisfied
     assert result.measurements["disease_subtype"].value is None
 
 
-def test_segmentation_measurement_reports_coverage(tmp_path):
+def test_segmentation_measurement_reports_coverage_and_colors(tmp_path):
     schema = _schema()
     predictor = _make_predictor(
         tmp_path, schema,
@@ -221,6 +182,7 @@ def test_segmentation_measurement_reports_coverage(tmp_path):
     assert seg_result.type == "segmentation"
     assert seg_result.coverage["algae"] == 100.0
     assert seg_result.coverage["background"] == 0.0
+    assert seg_result.seg_colors == {"background": "#000000", "algae": "#22c55e"}
     assert seg_result.mask_png_base64 == ""  # ENABLE_SEGMENTATION_OVERLAY unset by default
 
 
@@ -242,6 +204,7 @@ def test_regression_measurement_surfaces_explanation_from_matching_range(tmp_pat
         label="Disease severity",
         type="regression",
         loss_weight=0.5,
+        unit="score",
         min=0.0,
         max=100.0,
         applies_when=[AppliesWhen(key="condition", not_equals="Background")],
@@ -264,6 +227,9 @@ def test_regression_measurement_surfaces_explanation_from_matching_range(tmp_pat
     assert severity_result.value == 72.0
     assert severity_result.explanation == "Severe."
     assert severity_result.recommendation == "Isolate immediately."
+    assert severity_result.unit == "score"
+    assert severity_result.min == 0.0
+    assert severity_result.max == 100.0
 
 
 def test_regression_measurement_masked_by_applies_when_has_no_range_explanation(tmp_path):
@@ -300,26 +266,10 @@ def test_regression_measurement_masked_by_applies_when_has_no_range_explanation(
     assert severity_result.explanation is None
 
 
-def test_predictor_species_falls_back_to_unknown_when_schema_has_no_species_measurement(tmp_path):
-    """Species is a real predicted classification now (see the "species"
-    measurement in DEFAULT_SCHEMA), not a schema-wide constant. A schema
-    without one (like this generic test schema, or a pre-restructure
-    checkpoint) falls back to "Unknown species" rather than erroring."""
-    schema = _schema()
-    predictor = _make_predictor(
-        tmp_path, schema,
-        class_choice={"condition": "Healthy", "disease_subtype": "IceIce"},
-        regression_values={"health_score": 80.0},
-        seg_class_choice={"biofouling": 0},
-    )
-    result = predictor.predict(_fake_image_bytes())
-    assert result.species == "Unknown species"
-
-
 def test_predictor_species_comes_from_its_own_predicted_classification(tmp_path):
-    """When the schema does declare a "species" measurement, `result.species`
-    is that measurement's actual predicted class — not a fixed value, and not
-    tied to any notion of a single "active" species."""
+    """Species is a real predicted classification, same as any other
+    measurement — not a fixed value, and not tied to any notion of a single
+    "active" species."""
     presence = MeasurementDef(
         key="presence",
         label="Presence",
@@ -344,14 +294,15 @@ def test_predictor_species_comes_from_its_own_predicted_classification(tmp_path)
         seg_class_choice={},
     )
     result = predictor.predict(_fake_image_bytes())
-    assert result.species == "Eucheuma_denticulatum"
+    assert result.measurements["species"].value == "Eucheuma_denticulatum"
 
 
 def _current_style_schema() -> Schema:
     """Mirrors DEFAULT_SCHEMA's shape post "drop background_class
     requirement" migration: seaweed_presence is a plain Yes/No classification
     with no background_class declared, so schema.primary_classification()
-    returns None for it."""
+    returns None for it — there's no "primary classification" concept in
+    this schema at all."""
     seaweed_presence = MeasurementDef(
         key="seaweed_presence",
         label="Seaweed presence",
@@ -370,12 +321,12 @@ def _current_style_schema() -> Schema:
     return Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[seaweed_presence, health_status])
 
 
-def test_confidence_is_not_zero_when_no_measurement_declares_background_class(tmp_path):
-    """Regression test: with the current default schema shape (no
-    background_class anywhere), primary_classification() returns None, and
-    the flat `confidence` field used to unconditionally default to 0.0. It
-    should instead reflect the health_status prediction that also drives the
-    flat `condition`/`health` fields."""
+def test_confidence_reflects_softmax_regardless_of_background_class(tmp_path):
+    """Regression guard: each classification measurement's confidence comes
+    straight from its own softmax output — it never depends on whether some
+    OTHER measurement in the schema declares a background_class. This schema
+    mirrors DEFAULT_SCHEMA's current shape (no background_class anywhere),
+    where a flat "primary classification" concept doesn't exist at all."""
     schema = _current_style_schema()
     predictor = _make_predictor(
         tmp_path, schema,
@@ -385,16 +336,15 @@ def test_confidence_is_not_zero_when_no_measurement_declares_background_class(tm
     )
     result = predictor.predict(_fake_image_bytes())
 
-    assert result.is_seaweed is True
-    assert result.health == "Healthy"
-    assert result.confidence > 0.9  # fixed logits give near-certain confidence
+    assert result.measurements["seaweed_presence"].confidence > 0.9
+    assert result.measurements["health_status"].confidence > 0.9
 
 
-def test_no_seaweed_detected_and_confidence_nonzero_without_background_class(tmp_path):
-    """Same schema shape, but seaweed_presence predicts "No": is_seaweed must
-    flip to False (previously stuck at True with no background_class to
-    check against), and confidence should fall back to seaweed_presence's own
-    confidence rather than 0.0."""
+def test_measurement_gated_off_reports_null_value_not_omitted(tmp_path):
+    """seaweed_presence == "No" gates health_status off via applies_when —
+    it must still appear in the report (value=None, confidence=None), not be
+    silently dropped, so a client can tell "not applicable" from "not
+    defined in this schema"."""
     schema = _current_style_schema()
     predictor = _make_predictor(
         tmp_path, schema,
@@ -404,6 +354,25 @@ def test_no_seaweed_detected_and_confidence_nonzero_without_background_class(tmp
     )
     result = predictor.predict(_fake_image_bytes())
 
-    assert result.is_seaweed is False
-    assert result.health is None
-    assert result.confidence > 0.9
+    assert result.measurements["seaweed_presence"].value == "No"
+    assert result.measurements["health_status"].value is None
+    assert result.measurements["health_status"].confidence is None
+
+
+def test_gradcam_only_computed_for_first_classification_measurement(tmp_path):
+    """Grad-CAM is expensive (a backward pass per head), so only ever run for
+    one measurement per request — the first classification measurement in
+    schema order, deterministically, with no "primary"/background_class
+    concept needed. Every other classification's gradcam_png_base64 is None
+    (never attempted), distinct from "" (attempted but ENABLE_GRADCAM off)."""
+    schema = _current_style_schema()
+    predictor = _make_predictor(
+        tmp_path, schema,
+        class_choice={"seaweed_presence": "Yes", "health_status": "Healthy"},
+        regression_values={},
+        seg_class_choice={},
+    )
+    result = predictor.predict(_fake_image_bytes())
+
+    assert result.measurements["seaweed_presence"].gradcam_png_base64 == ""  # ENABLE_GRADCAM unset by default
+    assert result.measurements["health_status"].gradcam_png_base64 is None
