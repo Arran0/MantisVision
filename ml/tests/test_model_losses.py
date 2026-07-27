@@ -33,11 +33,7 @@ def _schema_with_all_three_types() -> Schema:
         loss_weight=1.0,
         seg_classes=[SegClassDef(name="background", color="#000000"), SegClassDef(name="algae", color="#22c55e")],
     )
-    return Schema(
-        health_moderate_min=45.0,
-        health_healthy_min=75.0,
-        measurements=[condition, health, biofouling],
-    )
+    return Schema(measurements=[condition, health, biofouling])
 
 
 def _fake_batch(schema: Schema, batch_size: int, image_size: int):
@@ -198,7 +194,7 @@ def test_regression_ranges_round_trip_through_dict():
             RangeDef(min=30.0, max=100.0, explanation="Severe.", recommendation="Isolate immediately."),
         ],
     )
-    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[severity])
+    schema = Schema(measurements=[severity])
 
     doc = schema_to_dict(schema)
     rebuilt = schema_from_dict(doc)

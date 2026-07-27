@@ -1,9 +1,10 @@
 """Inference API for the seaweed multi-head classifier.
 
-`species` is a real predicted classification (see the "species" measurement
-in config.DEFAULT_SCHEMA) — /predict's `species` field is the model's actual
-per-image prediction, not a fixed constant. Additional endpoints (predator,
-damage %, ...) can be added as sibling routers without touching this one.
+/predict returns one entry per measurement the active schema defines (see
+config.DEFAULT_SCHEMA) — species, presence, health, disease, etc. are all
+just predicted classifications/regressions in that map, not fixed constants
+or hardcoded flat fields. Additional endpoints (predator, damage %, ...) can
+be added as sibling routers without touching this one.
 
 Run:
     uvicorn src.api.main:app --reload --port 8000
@@ -148,27 +149,21 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
     result = predictor.predict(image_bytes)
 
     return PredictionResponse(
-        species=result.species,
-        is_seaweed=result.is_seaweed,
-        condition=result.condition,
-        health=result.health,
-        health_score=result.health_score,
-        confidence=result.confidence,
-        disease_subtype=result.disease_subtype,
-        dried_pct=result.dried_pct,
-        decayed_pct=result.decayed_pct,
-        explanation=result.explanation,
-        recommendation=result.recommendation,
-        gradcam_png_base64=result.gradcam_base64_png,
         measurements={
             key: MeasurementResultResponse(
                 type=m.type,
+                label=m.label,
                 value=m.value,
                 confidence=m.confidence,
                 explanation=m.explanation,
                 recommendation=m.recommendation,
+                unit=m.unit,
+                min=m.min,
+                max=m.max,
                 coverage=m.coverage,
+                seg_colors=m.seg_colors,
                 mask_png_base64=m.mask_png_base64,
+                gradcam_png_base64=m.gradcam_png_base64,
             )
             for key, m in result.measurements.items()
         },

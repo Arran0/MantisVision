@@ -5,31 +5,24 @@ from pydantic import BaseModel
 
 class MeasurementResultResponse(BaseModel):
     type: str  # "classification" | "regression" | "segmentation"
+    label: str
     value: str | float | None
     confidence: float | None
     explanation: str | None
     recommendation: str | None
+    unit: str | None
+    min: float | None
+    max: float | None
     coverage: dict[str, float] | None
+    seg_colors: dict[str, str] | None
     mask_png_base64: str | None
+    gradcam_png_base64: str | None
 
 
 class PredictionResponse(BaseModel):
-    # Legacy flat fields — kept so the current PWA (apps/web/src/app/api/
-    # predict/route.ts) keeps working unchanged.
-    species: str
-    is_seaweed: bool
-    condition: str
-    # Derived display level (Healthy/Moderate/Low). None for Background.
-    health: str | None
-    health_score: float | None  # 0-100
-    confidence: float
-    disease_subtype: str | None
-    dried_pct: float | None
-    decayed_pct: float | None
-    explanation: str
-    recommendation: str
-    gradcam_png_base64: str
-    # Generic, forward-looking report: one entry per schema measurement.
+    # The full schema-driven report — one entry per measurement, in schema
+    # order. No flat/legacy fields: a client renders whichever measurements
+    # are present (value is None where applies_when gated it off).
     measurements: dict[str, MeasurementResultResponse]
 
 

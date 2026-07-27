@@ -32,7 +32,7 @@ IMAGE_SIZE = 32
 
 
 def _schema(measurement: MeasurementDef) -> Schema:
-    return Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[measurement])
+    return Schema(measurements=[measurement])
 
 
 def _write_split(split_dir, rows) -> None:

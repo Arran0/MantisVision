@@ -22,8 +22,6 @@ from config import schema_from_dict
 from src.data.dataset import AnnotatedDataset
 
 SCHEMA_DOC = {
-    "health_moderate_min": 45.0,
-    "health_healthy_min": 75.0,
     "measurements": [
         {
             "key": "condition",

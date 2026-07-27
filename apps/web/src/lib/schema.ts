@@ -90,16 +90,6 @@ export interface MeasurementDef {
 }
 
 export interface SchemaDoc {
-  // Legacy display-level thresholds, relevant only to a schema whose health
-  // measurement is still a regressed health_score (see
-  // ml/src/inference/predictor.py's _derive_level fallback for a
-  // pre-restructure checkpoint): at or above health_healthy_min ->
-  // "Healthy"; at or above health_moderate_min (but below healthy) ->
-  // "Moderate"; otherwise "Low". The current required schema assigns
-  // health_status directly as a classification instead, so these are
-  // optional and have no admin UI of their own.
-  health_moderate_min?: number;
-  health_healthy_min?: number;
   measurements: MeasurementDef[];
 }
 
@@ -123,10 +113,6 @@ function labRegression(
 
 // Fallback used when no schema row exists yet. Mirrors the SQL seed.
 export const DEFAULT_SCHEMA: SchemaDoc = {
-  // Retained for schema compatibility; health status is now a labeled
-  // classification (below), no longer derived from a numeric score.
-  health_moderate_min: 45.0,
-  health_healthy_min: 75.0,
   measurements: [
     // A plain classification: is there a seaweed specimen in the frame?
     {
@@ -346,30 +332,12 @@ const KEY_RE = /^[a-z][a-z0-9_]*$/; // measurement keys are manifest/JSON identi
 const TOKEN_RE = /^[A-Za-z0-9_]+$/;
 const COLOR_RE = /^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/;
 
-function isFraction(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100;
-}
-
 // Validates a candidate schema document. Returns null if valid, else a
 // human-readable reason. The rules mirror the invariants the ML pipeline
 // (ml/config.py, ml/src/data/annotations.py) relies on.
 export function validateSchema(doc: unknown): string | null {
   if (typeof doc !== "object" || doc === null) return "Schema must be an object.";
   const t = doc as Partial<SchemaDoc>;
-
-  // Optional legacy thresholds — only validated if present at all, since the
-  // required schema no longer has any UI to set them (health_status is
-  // assigned directly as a classification now).
-  if (t.health_moderate_min !== undefined && !isFraction(t.health_moderate_min))
-    return "health_moderate_min must be a number between 0 and 100.";
-  if (t.health_healthy_min !== undefined && !isFraction(t.health_healthy_min))
-    return "health_healthy_min must be a number between 0 and 100.";
-  if (
-    t.health_moderate_min !== undefined &&
-    t.health_healthy_min !== undefined &&
-    t.health_healthy_min <= t.health_moderate_min
-  )
-    return "health_healthy_min must be greater than health_moderate_min.";
 
   if (!Array.isArray(t.measurements) || t.measurements.length === 0)
     return "At least one measurement is required.";

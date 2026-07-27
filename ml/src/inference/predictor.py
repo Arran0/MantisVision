@@ -1,9 +1,9 @@
 """Single entrypoint for turning an uploaded image into the full schema-driven
 report: one result per measurement (classification value + confidence,
-regression value, or segmentation coverage/mask), plus a legacy flat-field
-view (species, condition, health, health_score, ...) populated from the
-schema's primary classification and well-known measurement keys, so the
-current PWA keeps working unchanged. Used by the FastAPI inference service
+regression value, or segmentation coverage/mask). Fully generic — nothing is
+picked out as "primary"/"species"/"health" by a hardcoded key name; a client
+renders whichever measurements are present, in schema order, using each
+result's own `label`/`type`/`unit`/etc. Used by the FastAPI inference service
 (src/api/main.py).
 
 Preset explanation/recommendation copy comes from the checkpoint's own
@@ -38,51 +38,50 @@ ENABLE_GRADCAM = os.environ.get("ENABLE_GRADCAM", "false").lower() in ("1", "tru
 # backward pass) but still add response payload size; opt-in like Grad-CAM.
 ENABLE_SEGMENTATION_OVERLAY = os.environ.get("ENABLE_SEGMENTATION_OVERLAY", "false").lower() in ("1", "true", "yes")
 
-# Bucketing the regressed health_score into a coarse Healthy/Moderate/Low
-# display level for the PWA — purely score-based against the schema's two
-# thresholds, uniformly for any non-background subject. No condition/class
-# name is special-cased: an admin-renamed or brand-new condition gets the
-# same treatment as any other, since the level is a property of the score,
-# not of which class was predicted.
-def _derive_level(health_score: float, moderate_min: float, healthy_min: float) -> str:
-    if health_score >= healthy_min:
-        return "Healthy"
-    if health_score >= moderate_min:
-        return "Moderate"
-    return "Low"
-
 
 @dataclass
 class MeasurementResult:
     type: str  # "classification" | "regression" | "segmentation"
+    label: str
     value: str | float | None  # class name, numeric value, or None (segmentation / not applicable)
     confidence: float | None  # classification only
     explanation: str | None
     recommendation: str | None
+    unit: str | None  # regression only
+    min: float | None  # regression only — bounds for client-side meter scaling
+    max: float | None  # regression only
     coverage: dict[str, float] | None  # segmentation only: {seg_class_name: pct_of_frame}
+    seg_colors: dict[str, str] | None  # segmentation only: {seg_class_name: hex color}
     mask_png_base64: str | None  # segmentation only, "" unless ENABLE_SEGMENTATION_OVERLAY
+    gradcam_png_base64: str | None  # classification only, "" unless ENABLE_GRADCAM and this is the target head
 
 
 @dataclass
 class PredictionResult:
-    # Legacy flat fields, populated from the primary classification + the
-    # well-known measurement keys (health_score/dried_extent/decayed_extent/
-    # disease_subtype) when the active schema still has them under those
-    # names — kept for the current PWA, which reads exactly this shape.
-    species: str
-    is_seaweed: bool
-    condition: str
-    health: str | None
-    health_score: float | None
-    confidence: float
-    disease_subtype: str | None
-    dried_pct: float | None
-    decayed_pct: float | None
-    explanation: str
-    recommendation: str
-    gradcam_base64_png: str
-    # Generic, forward-looking report: every measurement in the schema.
+    # Every measurement in the active schema, keyed by measurement key and in
+    # schema order — the full, schema-driven report. A measurement gated off
+    # by applies_when (e.g. health_status when seaweed_presence == "No")
+    # still appears here with value=None, rather than being omitted, so a
+    # client can distinguish "not applicable" from "not in this schema".
     measurements: dict[str, MeasurementResult]
+
+
+def _empty_result(type_: str, label: str) -> MeasurementResult:
+    return MeasurementResult(
+        type=type_,
+        label=label,
+        value=None,
+        confidence=None,
+        explanation=None,
+        recommendation=None,
+        unit=None,
+        min=None,
+        max=None,
+        coverage=None,
+        seg_colors=None,
+        mask_png_base64=None,
+        gradcam_png_base64=None,
+    )
 
 
 def _augmented_recommendation(m: MeasurementDef, class_def: ClassDef | None, schema: Schema, predicted: dict) -> str | None:
@@ -109,29 +108,6 @@ def _augmented_recommendation(m: MeasurementDef, class_def: ClassDef | None, sch
                 notes.append(child_class_def.note)
     parts = ([base] if base else []) + notes
     return " ".join(parts) if parts else None
-
-
-def _collect_copy(schema: Schema, measurements: dict[str, MeasurementResult]) -> tuple[str, str]:
-    """Combine every applicable measurement's explanation/recommendation into
-    the flat top-level fields the current PWA renders, instead of surfacing
-    only one measurement's copy (e.g. health_status) and silently dropping
-    the rest (disease, colour, any regression's per-range copy, ...).
-    Measurements that don't apply (gated off by applies_when) or that have no
-    admin-authored copy contribute nothing; schema order determines the
-    order the sentences appear in."""
-    explanations = [
-        result.explanation
-        for m in schema.measurements
-        if (result := measurements.get(m.key)) is not None and result.explanation
-    ]
-    recommendations = [
-        result.recommendation
-        for m in schema.measurements
-        if (result := measurements.get(m.key)) is not None and result.recommendation
-    ]
-    explanation = " ".join(explanations) if explanations else "No explanation available yet."
-    recommendation = " ".join(recommendations) if recommendations else "No recommendation available yet."
-    return explanation, recommendation
 
 
 def _encode_seg_overlay_png(class_map: torch.Tensor, seg_classes: list) -> str:
@@ -166,7 +142,6 @@ class Predictor:
             outputs = self.model(input_tensor)
 
         schema = self.schema
-        primary = schema.primary_classification()
 
         # Pass 1: resolve every classification measurement's predicted class
         # first (independent of applies_when), so a later measurement can be
@@ -183,54 +158,62 @@ class Predictor:
             predicted_index[m.key] = index
             classification_confidence[m.key] = float(probs[index].item())
 
-        # Prefer the well-known "seaweed_presence" key directly: the current
-        # default schema's Yes/No presence classification declares no
-        # background_class at all (see the "drop background_class
-        # requirement" migration, which made that concept fully optional), so
-        # primary_classification() returns None for it and the background_
-        # class check below would never fire. Fall back to a background_
-        # class-declaring measurement for a pre-restructure checkpoint whose
-        # single "condition" head still combines presence with health.
-        presence_value = predicted_class.get("seaweed_presence")
-        if presence_value is not None:
-            is_background = presence_value != "Yes"
-        else:
-            is_background = primary is not None and predicted_class.get(primary.key) == primary.background_class
+        # A Grad-CAM backward pass is expensive (see ENABLE_GRADCAM above), so
+        # only ever compute one per request rather than one per classification
+        # head. There's no "primary" concept in the schema to defer to, so we
+        # just pick the first classification measurement in schema order —
+        # deterministic, and not tied to any particular key name.
+        gradcam_target_key = next((m.key for m in schema.measurements if m.type == "classification"), None)
 
         measurements: dict[str, MeasurementResult] = {}
         for m in schema.measurements:
             applies = schema.applies(m, predicted_class)
 
             if m.type == "classification":
-                class_name = predicted_class[m.key]
                 if not applies:
-                    measurements[m.key] = MeasurementResult("classification", None, None, None, None, None, None)
+                    measurements[m.key] = _empty_result("classification", m.label)
                     continue
+                class_name = predicted_class[m.key]
                 class_def = next((c for c in m.classes if c.name == class_name), None)
+                gradcam_b64 = (
+                    self._maybe_gradcam(image, m.key, predicted_index[m.key]) if m.key == gradcam_target_key else None
+                )
                 measurements[m.key] = MeasurementResult(
                     type="classification",
+                    label=m.label,
                     value=class_name,
                     confidence=classification_confidence[m.key],
                     explanation=(class_def.explanation if class_def else None),
                     recommendation=_augmented_recommendation(m, class_def, schema, predicted_class),
+                    unit=None,
+                    min=None,
+                    max=None,
                     coverage=None,
+                    seg_colors=None,
                     mask_png_base64=None,
+                    gradcam_png_base64=gradcam_b64,
                 )
             elif m.type == "regression":
                 raw = float(outputs[m.key].squeeze(0).item())
                 range_def = m.range_for(raw) if applies else None
                 measurements[m.key] = MeasurementResult(
                     type="regression",
+                    label=m.label,
                     value=round(raw, 1) if applies else None,
                     confidence=None,
                     explanation=(range_def.explanation if range_def else None),
                     recommendation=(range_def.recommendation if range_def else None),
+                    unit=m.unit,
+                    min=m.min,
+                    max=m.max,
                     coverage=None,
+                    seg_colors=None,
                     mask_png_base64=None,
+                    gradcam_png_base64=None,
                 )
             elif m.type == "segmentation":
                 if not applies:
-                    measurements[m.key] = MeasurementResult("segmentation", None, None, None, None, None, None)
+                    measurements[m.key] = _empty_result("segmentation", m.label)
                     continue
                 probs = F.softmax(outputs[m.key], dim=1).squeeze(0)
                 class_map = probs.argmax(dim=0)
@@ -239,102 +222,26 @@ class Predictor:
                     seg_class.name: round(float((class_map == i).sum().item()) / total * 100.0, 1)
                     for i, seg_class in enumerate(m.seg_classes)
                 }
+                seg_colors = {seg_class.name: seg_class.color for seg_class in m.seg_classes}
                 mask_b64 = _encode_seg_overlay_png(class_map, m.seg_classes) if ENABLE_SEGMENTATION_OVERLAY else ""
                 measurements[m.key] = MeasurementResult(
                     type="segmentation",
+                    label=m.label,
                     value=None,
                     confidence=None,
                     explanation=None,
                     recommendation=None,
+                    unit=None,
+                    min=None,
+                    max=None,
                     coverage=coverage,
+                    seg_colors=seg_colors,
                     mask_png_base64=mask_b64,
+                    gradcam_png_base64=None,
                 )
 
-        # --- Legacy flat fields, from the well-known measurement keys when the
-        # schema has them, falling back to the older names so pre-restructure
-        # checkpoints keep populating the same PWA shape. ---
-
-        def first_result(*keys: str):
-            for key in keys:
-                result = measurements.get(key)
-                if result is not None:
-                    return result
-            return None
-
-        # Health status is now a labeled class (Healthy/Moderate/Low); older
-        # checkpoints instead regressed a health_score we bucket into a level.
-        health_status_result = measurements.get("health_status")
-        health_score_result = measurements.get("health_score")
-        health_score_value = (
-            health_score_result.value if health_score_result and isinstance(health_score_result.value, (int, float)) else None
-        )
-        if health_status_result is not None and isinstance(health_status_result.value, str):
-            level = health_status_result.value
-        elif health_score_value is not None:
-            level = _derive_level(health_score_value, schema.health_moderate_min, schema.health_healthy_min)
-        else:
-            level = None
-
-        # The flat `confidence` field tracks whichever measurement decided
-        # the flat `condition`/`health` label above: health_status when the
-        # current schema's split-out head fired, the background_class-
-        # declaring "condition" head for a pre-restructure checkpoint, and —
-        # when neither applies (no subject in frame, under the current
-        # schema) — the seaweed_presence classification's own confidence, so
-        # this doesn't stay stuck at 0.0 just because no measurement declares
-        # a background_class anymore.
-        if health_status_result is not None and health_status_result.confidence is not None:
-            confidence = health_status_result.confidence
-        elif primary is not None:
-            confidence = classification_confidence.get(primary.key, 0.0)
-        else:
-            confidence = classification_confidence.get("seaweed_presence", 0.0)
-
-        # Species is a real predicted classification now (see the "species"
-        # measurement in DEFAULT_SCHEMA), not a fixed schema-wide constant —
-        # older checkpoints predate it entirely, hence the fallback.
-        species_result = measurements.get("species")
-        species_value = (
-            species_result.value if species_result and isinstance(species_result.value, str) else "Unknown species"
-        )
-
-        dried_result = first_result("dried", "dried_extent")
-        decayed_result = first_result("decayed", "decayed_extent")
-        disease_result = first_result("disease", "disease_subtype")
-        disease_value = disease_result.value if disease_result and isinstance(disease_result.value, str) else None
-        # "NoDisease" is the explicit no-finding class — surface it as no subtype.
-        if disease_value == "NoDisease":
-            disease_value = None
-
-        # For the flat `condition` field, prefer the health status label.
-        condition_name = (
-            health_status_result.value
-            if (health_status_result is not None and isinstance(health_status_result.value, str))
-            else (predicted_class.get(primary.key, "Unknown") if primary else "Unknown")
-        )
-
-        gradcam_b64 = ""
-        if primary is not None:
-            gradcam_b64 = self._maybe_gradcam(image, primary.key, predicted_index[primary.key])
-
-        explanation, recommendation = _collect_copy(schema, measurements)
-
         del input_tensor
-        return PredictionResult(
-            species=species_value,
-            is_seaweed=not is_background,
-            condition=condition_name,
-            health=level,
-            health_score=health_score_value,
-            confidence=confidence,
-            disease_subtype=disease_value,
-            dried_pct=(dried_result.value if dried_result and isinstance(dried_result.value, (int, float)) else None),
-            decayed_pct=(decayed_result.value if decayed_result and isinstance(decayed_result.value, (int, float)) else None),
-            explanation=explanation,
-            recommendation=recommendation,
-            gradcam_base64_png=gradcam_b64,
-            measurements=measurements,
-        )
+        return PredictionResult(measurements=measurements)
 
     def _maybe_gradcam(self, image: Image.Image, measurement_key: str, class_index: int) -> str:
         if not ENABLE_GRADCAM:

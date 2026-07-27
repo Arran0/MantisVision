@@ -1,17 +1,24 @@
+export interface MeasurementResult {
+  type: "classification" | "regression" | "segmentation";
+  label: string;
+  value: string | number | null;
+  confidence: number | null; // classification only
+  explanation: string | null;
+  recommendation: string | null;
+  unit: string | null; // regression only
+  min: number | null; // regression only
+  max: number | null; // regression only
+  coverage: Record<string, number> | null; // segmentation only: {seg_class_name: pct_of_frame}
+  segColors: Record<string, string> | null; // segmentation only: {seg_class_name: hex color}
+  maskPngBase64: string | null; // segmentation only
+  gradcamPngBase64: string | null; // classification only
+}
+
 export interface PredictionResult {
-  species: string;
-  isSeaweed: boolean;
-  condition: string;
-  // Derived display level (Healthy/Moderate/Low). null for Background/no seaweed.
-  health: string | null;
-  healthScore: number | null; // 0-100
-  confidence: number;
-  diseaseSubtype: string | null;
-  driedPct: number | null;
-  decayedPct: number | null;
-  explanation: string;
-  recommendation: string;
-  gradcamPngBase64: string;
+  // Every measurement the active schema defines, keyed by measurement key
+  // and in schema order. No flat/legacy fields — render whichever entries
+  // have a non-null value.
+  measurements: Record<string, MeasurementResult>;
 }
 
 export interface TrainingImage {

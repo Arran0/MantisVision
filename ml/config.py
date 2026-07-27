@@ -14,10 +14,7 @@ schema-level "active species" concept, so the dataset directory is no longer
 species-scoped (see Config.dataset_dir).
 
 health_status (Healthy/Moderate/Low) is a labeled classification the admin
-assigns per image, not a bucket derived from a score. health_moderate_min/
-health_healthy_min are kept only so an older checkpoint that still regresses
-a health_score can be bucketed into the same display level (see
-src/inference/predictor.py's _derive_level).
+assigns per image, not a bucket derived from a score.
 """
 from __future__ import annotations
 
@@ -35,12 +32,6 @@ ML_ROOT = Path(__file__).resolve().parent
 # truth is the measurement schema itself.
 DEFAULT_CONDITION_CLASSES = ["Background", "Healthy", "Disease", "Decay", "Dried"]
 DEFAULT_DISEASE_SUBTYPES = ["IceIce", "Epiphyte", "Bacterial", "Bleaching", "Unknown"]
-
-# Display-level thresholds (see predictor._derive_level): health_score at or
-# above HEALTHY_MIN -> "Healthy"; at or above MODERATE_MIN (but below
-# healthy) -> "Moderate"; otherwise "Low".
-DEFAULT_HEALTH_MODERATE_MIN: float = 45.0
-DEFAULT_HEALTH_HEALTHY_MIN: float = 75.0
 
 # --- Measurement schema ----------------------------------------------------
 # The taxonomy above (species/conditions/subtypes/anchors) is the *fallback*.
@@ -116,8 +107,6 @@ class MeasurementDef:
 
 @dataclass
 class Schema:
-    health_moderate_min: float
-    health_healthy_min: float
     measurements: list[MeasurementDef]
 
     def find(self, key: str) -> MeasurementDef | None:
@@ -199,11 +188,7 @@ def schema_from_dict(doc: dict) -> Schema:
             f"Schema document's 'measurements' field must be a list, got {type(measurements_raw).__name__}."
         )
 
-    return Schema(
-        health_moderate_min=float(doc.get("health_moderate_min", DEFAULT_HEALTH_MODERATE_MIN)),
-        health_healthy_min=float(doc.get("health_healthy_min", DEFAULT_HEALTH_HEALTHY_MIN)),
-        measurements=[_measurement(m) for m in measurements_raw],
-    )
+    return Schema(measurements=[_measurement(m) for m in measurements_raw])
 
 
 def schema_to_dict(schema: Schema) -> dict:
@@ -251,11 +236,7 @@ def schema_to_dict(schema: Schema) -> dict:
             d["seg_classes"] = [{"name": c.name, "color": c.color} for c in m.seg_classes]
         return d
 
-    return {
-        "health_moderate_min": schema.health_moderate_min,
-        "health_healthy_min": schema.health_healthy_min,
-        "measurements": [_measurement(m) for m in schema.measurements],
-    }
+    return {"measurements": [_measurement(m) for m in schema.measurements]}
 
 
 # The default schema — kept in sync with apps/web/src/lib/schema.ts's
@@ -281,8 +262,6 @@ def _lab_regression(key: str, label: str, unit: str, max_value: float, applies_w
 
 DEFAULT_SCHEMA: Schema = schema_from_dict(
     {
-        "health_moderate_min": DEFAULT_HEALTH_MODERATE_MIN,
-        "health_healthy_min": DEFAULT_HEALTH_HEALTHY_MIN,
         "measurements": [
             {
                 "key": "seaweed_presence",
@@ -478,11 +457,7 @@ def legacy_schema_from_checkpoint(payload: dict) -> Schema:
         ]
     ]
 
-    return Schema(
-        health_moderate_min=DEFAULT_HEALTH_MODERATE_MIN,
-        health_healthy_min=DEFAULT_HEALTH_HEALTHY_MIN,
-        measurements=[condition_measurement, subtype_measurement, *regression_measurements],
-    )
+    return Schema(measurements=[condition_measurement, subtype_measurement, *regression_measurements])
 
 
 # Env var override for tooling/tests; production loads from the path the
