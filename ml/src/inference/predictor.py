@@ -183,7 +183,19 @@ class Predictor:
             predicted_index[m.key] = index
             classification_confidence[m.key] = float(probs[index].item())
 
-        is_background = primary is not None and predicted_class.get(primary.key) == primary.background_class
+        # Prefer the well-known "seaweed_presence" key directly: the current
+        # default schema's Yes/No presence classification declares no
+        # background_class at all (see the "drop background_class
+        # requirement" migration, which made that concept fully optional), so
+        # primary_classification() returns None for it and the background_
+        # class check below would never fire. Fall back to a background_
+        # class-declaring measurement for a pre-restructure checkpoint whose
+        # single "condition" head still combines presence with health.
+        presence_value = predicted_class.get("seaweed_presence")
+        if presence_value is not None:
+            is_background = presence_value != "Yes"
+        else:
+            is_background = primary is not None and predicted_class.get(primary.key) == primary.background_class
 
         measurements: dict[str, MeasurementResult] = {}
         for m in schema.measurements:
@@ -241,7 +253,6 @@ class Predictor:
         # --- Legacy flat fields, from the well-known measurement keys when the
         # schema has them, falling back to the older names so pre-restructure
         # checkpoints keep populating the same PWA shape. ---
-        confidence = classification_confidence.get(primary.key, 0.0) if primary else 0.0
 
         def first_result(*keys: str):
             for key in keys:
@@ -263,6 +274,21 @@ class Predictor:
             level = _derive_level(health_score_value, schema.health_moderate_min, schema.health_healthy_min)
         else:
             level = None
+
+        # The flat `confidence` field tracks whichever measurement decided
+        # the flat `condition`/`health` label above: health_status when the
+        # current schema's split-out head fired, the background_class-
+        # declaring "condition" head for a pre-restructure checkpoint, and —
+        # when neither applies (no subject in frame, under the current
+        # schema) — the seaweed_presence classification's own confidence, so
+        # this doesn't stay stuck at 0.0 just because no measurement declares
+        # a background_class anymore.
+        if health_status_result is not None and health_status_result.confidence is not None:
+            confidence = health_status_result.confidence
+        elif primary is not None:
+            confidence = classification_confidence.get(primary.key, 0.0)
+        else:
+            confidence = classification_confidence.get("seaweed_presence", 0.0)
 
         # Species is a real predicted classification now (see the "species"
         # measurement in DEFAULT_SCHEMA), not a fixed schema-wide constant —
