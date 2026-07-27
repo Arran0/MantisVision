@@ -35,7 +35,7 @@ flowchart TB
     Routes -->|dispatch retrain| Actions
     Actions -->|pull dataset| Kaggle
     Actions -->|export schema, write results| Supabase
-    Actions -->|publish checkpoint\n(GitHub Release)| API
+    Actions -->|"publish checkpoint\n(GitHub Release)"| API
     Routes -->|promote → /admin/reload| API
 ```
 
