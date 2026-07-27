@@ -345,3 +345,65 @@ def test_predictor_species_comes_from_its_own_predicted_classification(tmp_path)
     )
     result = predictor.predict(_fake_image_bytes())
     assert result.species == "Eucheuma_denticulatum"
+
+
+def _current_style_schema() -> Schema:
+    """Mirrors DEFAULT_SCHEMA's shape post "drop background_class
+    requirement" migration: seaweed_presence is a plain Yes/No classification
+    with no background_class declared, so schema.primary_classification()
+    returns None for it."""
+    seaweed_presence = MeasurementDef(
+        key="seaweed_presence",
+        label="Seaweed presence",
+        type="classification",
+        loss_weight=1.0,
+        classes=[ClassDef(name="Yes"), ClassDef(name="No")],
+    )
+    health_status = MeasurementDef(
+        key="health_status",
+        label="Health status",
+        type="classification",
+        loss_weight=1.0,
+        applies_when=[AppliesWhen(key="seaweed_presence", equals="Yes")],
+        classes=[ClassDef(name="Healthy"), ClassDef(name="Moderate"), ClassDef(name="Low")],
+    )
+    return Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[seaweed_presence, health_status])
+
+
+def test_confidence_is_not_zero_when_no_measurement_declares_background_class(tmp_path):
+    """Regression test: with the current default schema shape (no
+    background_class anywhere), primary_classification() returns None, and
+    the flat `confidence` field used to unconditionally default to 0.0. It
+    should instead reflect the health_status prediction that also drives the
+    flat `condition`/`health` fields."""
+    schema = _current_style_schema()
+    predictor = _make_predictor(
+        tmp_path, schema,
+        class_choice={"seaweed_presence": "Yes", "health_status": "Healthy"},
+        regression_values={},
+        seg_class_choice={},
+    )
+    result = predictor.predict(_fake_image_bytes())
+
+    assert result.is_seaweed is True
+    assert result.health == "Healthy"
+    assert result.confidence > 0.9  # fixed logits give near-certain confidence
+
+
+def test_no_seaweed_detected_and_confidence_nonzero_without_background_class(tmp_path):
+    """Same schema shape, but seaweed_presence predicts "No": is_seaweed must
+    flip to False (previously stuck at True with no background_class to
+    check against), and confidence should fall back to seaweed_presence's own
+    confidence rather than 0.0."""
+    schema = _current_style_schema()
+    predictor = _make_predictor(
+        tmp_path, schema,
+        class_choice={"seaweed_presence": "No", "health_status": "Healthy"},
+        regression_values={},
+        seg_class_choice={},
+    )
+    result = predictor.predict(_fake_image_bytes())
+
+    assert result.is_seaweed is False
+    assert result.health is None
+    assert result.confidence > 0.9
