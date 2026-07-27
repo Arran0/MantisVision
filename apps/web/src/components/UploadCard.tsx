@@ -243,7 +243,7 @@ export function UploadCard() {
               </>
             ) : (
               <img
-                src="/seaweed-placeholder.svg"
+                src="/seaweed-placeholder.png"
                 alt=""
                 aria-hidden
                 className="h-full w-full object-contain p-6 opacity-90"
