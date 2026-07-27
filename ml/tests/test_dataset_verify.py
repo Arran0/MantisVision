@@ -31,7 +31,7 @@ def _schema_with_background() -> Schema:
         background_class="Background",
         classes=[ClassDef(name="Background"), ClassDef(name="Healthy")],
     )
-    return Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[condition])
+    return Schema(measurements=[condition])
 
 
 def _schema_without_background() -> Schema:
@@ -45,7 +45,7 @@ def _schema_without_background() -> Schema:
         loss_weight=1.0,
         classes=[ClassDef(name="Yes"), ClassDef(name="No")],
     )
-    return Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[presence])
+    return Schema(measurements=[presence])
 
 
 def _write_split(split_dir, rows_spec):

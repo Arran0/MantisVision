@@ -50,11 +50,7 @@ def _make_schema() -> Schema:
         loss_weight=1.0,
         seg_classes=[SegClassDef(name="background", color="#000000"), SegClassDef(name="algae", color="#22c55e")],
     )
-    return Schema(
-        health_moderate_min=45.0,
-        health_healthy_min=75.0,
-        measurements=[condition, health, biofouling],
-    )
+    return Schema(measurements=[condition, health, biofouling])
 
 
 def _write_split(split_dir, rows_spec):

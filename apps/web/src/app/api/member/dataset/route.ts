@@ -103,20 +103,13 @@ function stringOrNull(value: FormDataEntryValue | string | null | undefined): st
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-// Legacy flat columns are populated opportunistically from the well-known
-// measurement keys (for existing queries/back-compat); they're no longer the
-// source of truth for training — `measurements` is. Both the new keys and the
-// pre-restructure names are accepted so a mixed dataset keeps filling these
-// columns. Species and colour are just schema classifications now
-// (measurements["species"] / measurements["colour"]), same as any other — no
-// more special-cased form fields or a schema-level "active species".
-function measurementString(measurements: Record<string, string | number>, ...keys: string[]): string | null {
-  for (const key of keys) if (typeof measurements[key] === "string") return measurements[key] as string;
-  return null;
-}
-function measurementNumber(measurements: Record<string, string | number>, ...keys: string[]): number | null {
-  for (const key of keys) if (typeof measurements[key] === "number") return measurements[key] as number;
-  return null;
+// `species`/`colour` are kept as flat columns (denormalized out of
+// `measurements`) purely so list/filter queries can read them directly
+// without unpacking jsonb — they're just schema classifications like any
+// other (measurements["species"] / measurements["colour"]), not a
+// schema-level "active species" concept.
+function measurementString(measurements: Record<string, string | number>, key: string): string | null {
+  return typeof measurements[key] === "string" ? (measurements[key] as string) : null;
 }
 
 // Parses+validates the client-submitted `measurements` JSON field against the
@@ -208,9 +201,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Storage objects are grouped by their primary classification's predicted
+  // value (e.g. "Yes"/"No" or a condition name) purely for readable bucket
+  // layout in the bucket browser — not read back by any code path.
   const primary = getPrimaryClassification(schema);
   const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
-  const isBackground = !!primary && primaryValue === primary.background_class;
   const notes = stringOrNull(formData.get("notes"));
 
   // The labels (measurements/notes) are shared across the whole batch — each
@@ -247,12 +242,6 @@ export async function POST(request: NextRequest) {
           created_by: auth.context.userId,
           storage_path: storagePath,
           measurements,
-          condition: measurementString(measurements, "health_status", "condition"),
-          subtype: measurementString(measurements, "disease", "disease_subtype"),
-          health_score: measurementNumber(measurements, "health_score"),
-          dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
-          decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
-          is_background: isBackground,
           species: measurementString(measurements, "species"),
           colour: measurementString(measurements, "colour"),
           notes,
@@ -379,20 +368,10 @@ export async function PATCH(request: NextRequest) {
     split = body.split as "train" | "validation" | "test";
   }
 
-  const primary = getPrimaryClassification(schema);
-  const primaryValue = primary ? (measurements[primary.key] as string | undefined) : undefined;
-  const isBackground = !!primary && primaryValue === primary.background_class;
-
   const { data: row, error: updateError } = await admin
     .from("training_images")
     .update({
       measurements,
-      condition: measurementString(measurements, "health_status", "condition"),
-      subtype: measurementString(measurements, "disease", "disease_subtype"),
-      health_score: measurementNumber(measurements, "health_score"),
-      dried_pct: measurementNumber(measurements, "dried", "dried_extent"),
-      decayed_pct: measurementNumber(measurements, "decayed", "decayed_extent"),
-      is_background: isBackground,
       species: measurementString(measurements, "species"),
       colour: measurementString(measurements, "colour"),
       notes: stringOrNull(body?.notes),

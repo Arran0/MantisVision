@@ -54,11 +54,7 @@ def _schema() -> Schema:
         loss_weight=1.0,
         seg_classes=[SegClassDef(name="background", color="#000000"), SegClassDef(name="algae", color="#22c55e")],
     )
-    return Schema(
-        health_moderate_min=45.0,
-        health_healthy_min=75.0,
-        measurements=[condition, disease_subtype, health_score, biofouling],
-    )
+    return Schema(measurements=[condition, disease_subtype, health_score, biofouling])
 
 
 class _FixedLogitsModel(nn.Module):
@@ -213,7 +209,7 @@ def test_regression_measurement_surfaces_explanation_from_matching_range(tmp_pat
             RangeDef(min=30.0, max=100.0, explanation="Severe.", recommendation="Isolate immediately."),
         ],
     )
-    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[condition, severity])
+    schema = Schema(measurements=[condition, severity])
 
     predictor = _make_predictor(
         tmp_path, schema,
@@ -251,7 +247,7 @@ def test_regression_measurement_masked_by_applies_when_has_no_range_explanation(
         applies_when=[AppliesWhen(key="condition", not_equals="Background")],
         ranges=[RangeDef(min=0.0, max=100.0, explanation="Severe.")],
     )
-    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[condition, severity])
+    schema = Schema(measurements=[condition, severity])
 
     predictor = _make_predictor(
         tmp_path, schema,
@@ -285,7 +281,7 @@ def test_predictor_species_comes_from_its_own_predicted_classification(tmp_path)
         loss_weight=1.0,
         classes=[ClassDef(name="Kappaphycus_alvarezii"), ClassDef(name="Eucheuma_denticulatum")],
     )
-    schema = Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[presence, species])
+    schema = Schema(measurements=[presence, species])
 
     predictor = _make_predictor(
         tmp_path, schema,
@@ -318,7 +314,7 @@ def _current_style_schema() -> Schema:
         applies_when=[AppliesWhen(key="seaweed_presence", equals="Yes")],
         classes=[ClassDef(name="Healthy"), ClassDef(name="Moderate"), ClassDef(name="Low")],
     )
-    return Schema(health_moderate_min=45.0, health_healthy_min=75.0, measurements=[seaweed_presence, health_status])
+    return Schema(measurements=[seaweed_presence, health_status])
 
 
 def test_confidence_reflects_softmax_regardless_of_background_class(tmp_path):

@@ -36,11 +36,7 @@ def _tiny_schema() -> Schema:
         max=100.0,
         applies_when=[AppliesWhen(key="condition", not_equals="Background")],
     )
-    return Schema(
-        health_moderate_min=45.0,
-        health_healthy_min=75.0,
-        measurements=[condition, subtype, health],
-    )
+    return Schema(measurements=[condition, subtype, health])
 
 
 def test_derive_targets_classification_present():
